@@ -23,6 +23,7 @@ export default function OrderComparison() {
     setShowProgress(true)
     setProgress(0)
     setProgressMessage('准备中...')
+    setResults([])
 
     // 这里将在Task 8中集成真实API
     console.log('开始对比', { factoryType, factoryFile, jiudingFile })
