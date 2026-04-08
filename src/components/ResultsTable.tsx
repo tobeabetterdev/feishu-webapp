@@ -10,31 +10,31 @@ export default function ResultsTable({ data }: ResultsTableProps) {
   }
 
   return (
-    <div className="overflow-x-auto">
+    <div className="overflow-x-auto -mx-4 px-4 md:mx-0 md:px-0">
       <table className="min-w-full bg-white border border-gray-200">
         <thead className="bg-gray-50">
           <tr>
-            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">日期</th>
-            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">单号</th>
-            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">工厂</th>
-            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">型号</th>
-            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">公司</th>
-            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">客户出库数</th>
-            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">久鼎出库数</th>
-            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">待处理数量</th>
+            <th className="px-2 md:px-4 py-2 md:py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">日期</th>
+            <th className="px-2 md:px-4 py-2 md:py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">单号</th>
+            <th className="px-2 md:px-4 py-2 md:py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">工厂</th>
+            <th className="px-2 md:px-4 py-2 md:py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">型号</th>
+            <th className="px-2 md:px-4 py-2 md:py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">公司</th>
+            <th className="px-2 md:px-4 py-2 md:py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">客户出库数</th>
+            <th className="px-2 md:px-4 py-2 md:py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">久鼎出库数</th>
+            <th className="px-2 md:px-4 py-2 md:py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">待处理数量</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-200">
           {data.map((row, index) => (
             <tr key={index} className="hover:bg-gray-50">
-              <td className="px-4 py-3 text-sm text-gray-900">{row.日期}</td>
-              <td className="px-4 py-3 text-sm text-gray-900">{row.单号}</td>
-              <td className="px-4 py-3 text-sm text-gray-900">{row.工厂 || '-'}</td>
-              <td className="px-4 py-3 text-sm text-gray-900">{row.型号}</td>
-              <td className="px-4 py-3 text-sm text-gray-900">{row.公司}</td>
-              <td className="px-4 py-3 text-sm text-gray-900">{row.客户出库数 ?? '-'}</td>
-              <td className="px-4 py-3 text-sm text-gray-900">{row.久鼎出库数 ?? '-'}</td>
-              <td className="px-4 py-3 text-sm text-gray-900">{row.待处理数量 ?? '-'}</td>
+              <td className="px-2 md:px-4 py-2 md:py-3 text-xs md:text-sm text-gray-900 whitespace-nowrap">{row.日期}</td>
+              <td className="px-2 md:px-4 py-2 md:py-3 text-xs md:text-sm text-gray-900 whitespace-nowrap">{row.单号}</td>
+              <td className="px-2 md:px-4 py-2 md:py-3 text-xs md:text-sm text-gray-900 whitespace-nowrap">{row.工厂 || '-'}</td>
+              <td className="px-2 md:px-4 py-2 md:py-3 text-xs md:text-sm text-gray-900 whitespace-nowrap">{row.型号}</td>
+              <td className="px-2 md:px-4 py-2 md:py-3 text-xs md:text-sm text-gray-900 whitespace-nowrap">{row.公司}</td>
+              <td className="px-2 md:px-4 py-2 md:py-3 text-xs md:text-sm text-gray-900 whitespace-nowrap">{row.客户出库数 ?? '-'}</td>
+              <td className="px-2 md:px-4 py-2 md:py-3 text-xs md:text-sm text-gray-900 whitespace-nowrap">{row.久鼎出库数 ?? '-'}</td>
+              <td className="px-2 md:px-4 py-2 md:py-3 text-xs md:text-sm text-gray-900 whitespace-nowrap">{row.待处理数量 ?? '-'}</td>
             </tr>
           ))}
         </tbody>
