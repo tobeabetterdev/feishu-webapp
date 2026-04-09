@@ -1,0 +1,55 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 34 42% 97%;
+    --foreground: 218 38% 16%;
+    --panel: 0 0% 100%;
+    --panel-strong: 216 44% 14%;
+    --line: 214 32% 88%;
+    --brand: 188 80% 33%;
+    --brand-soft: 27 92% 67%;
+  }
+
+  * {
+    @apply border-slate-200;
+  }
+
+  html {
+    scroll-behavior: smooth;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    margin: 0;
+    overflow-x: hidden;
+    background:
+      radial-gradient(circle at top left, rgba(249, 183, 112, 0.24), transparent 28%),
+      radial-gradient(circle at top right, rgba(45, 163, 163, 0.18), transparent 24%),
+      linear-gradient(180deg, #fffaf3 0%, #f8f4ed 52%, #f6f2ea 100%);
+    color: hsl(var(--foreground));
+    font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+
+  #root {
+    min-height: 100vh;
+  }
+
+  button,
+  input,
+  textarea,
+  select {
+    font: inherit;
+  }
+
+  @media (max-width: 768px) {
+    button,
+    a {
+      min-height: 44px;
+      min-width: 44px;
+    }
+  }
+}

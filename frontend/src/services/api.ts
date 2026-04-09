@@ -22,7 +22,7 @@ export interface TaskResult {
 export async function createComparison(
   factoryFile: File,
   jiudingFile: File,
-  factoryType: string
+  factoryType: string,
 ): Promise<CompareResponse> {
   const formData = new FormData()
   formData.append('factory_file', factoryFile)
@@ -35,7 +35,8 @@ export async function createComparison(
   })
 
   if (!response.ok) {
-    throw new Error('创建对比任务失败')
+    const errorText = await response.text()
+    throw new Error(`创建核对任务失败: ${errorText}`)
   }
 
   return response.json()
@@ -44,7 +45,8 @@ export async function createComparison(
 export async function getTaskStatus(taskId: string): Promise<TaskStatus> {
   const response = await fetch(`${API_BASE_URL}/compare/${taskId}/status`)
   if (!response.ok) {
-    throw new Error('获取任务状态失败')
+    const errorText = await response.text()
+    throw new Error(`获取任务状态失败: ${errorText}`)
   }
   return response.json()
 }
@@ -52,7 +54,8 @@ export async function getTaskStatus(taskId: string): Promise<TaskStatus> {
 export async function getTaskResult(taskId: string): Promise<TaskResult> {
   const response = await fetch(`${API_BASE_URL}/compare/${taskId}/result`)
   if (!response.ok) {
-    throw new Error('获取任务结果失败')
+    const errorText = await response.text()
+    throw new Error(`获取任务结果失败: ${errorText}`)
   }
   return response.json()
 }

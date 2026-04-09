@@ -60,8 +60,7 @@ feishu-webapp/
 │   └── SETUP.md             # 安装部署指南
 ├── docker-compose.yml        # Docker Compose 配置
 ├── README.md                # 项目说明 (本文件)
-├── .dockerignore           # Docker 忽略文件
-└── package.json            # Node.js 依赖
+└── .gitignore              # Git 忽略文件配置
 ```
 
 ## 快速开始
@@ -88,17 +87,22 @@ docker-compose up -d
 
 #### 前端开发
 
-1. 安装依赖：
+1. 进入前端目录：
+```bash
+cd frontend
+```
+
+2. 安装依赖：
 ```bash
 npm install
 ```
 
-2. 启动开发服务器：
+3. 启动开发服务器：
 ```bash
 npm run dev
 ```
 
-3. 访问: http://localhost:5173
+4. 访问: http://localhost:5173
 
 #### 后端开发
 
