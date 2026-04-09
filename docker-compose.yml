@@ -5,8 +5,10 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        NPM_REGISTRY: https://registry.npmmirror.com
     ports:
-      - "80:80"
+      - "18080:80"
     depends_on:
       - backend
     environment:
@@ -25,8 +27,8 @@ services:
         PIP_FALLBACK_TRUSTED_HOST: mirrors.aliyun.com
         PIP_LAST_RESORT_INDEX_URL: https://pypi.org/simple
         PIP_LAST_RESORT_TRUSTED_HOST: pypi.org
-    ports:
-      - "8000:8000"
+    expose:
+      - "8000"
     volumes:
       - ./backend/outputs:/app/outputs
     environment:
