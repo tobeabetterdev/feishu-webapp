@@ -1,6 +1,14 @@
+import warnings
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from api.compare import router as compare_router
+
+warnings.filterwarnings(
+    "ignore",
+    message="Workbook contains no default style, apply openpyxl's default",
+    category=UserWarning,
+)
 
 app = FastAPI(title="工厂订单数据核对API")
 

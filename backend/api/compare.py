@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import json
 import logging
 import math
 import os
 import traceback
 import uuid
+import warnings
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
+import pandas as pd
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
@@ -17,8 +20,8 @@ from pydantic import BaseModel
 from config.settings import build_task_llm_settings, load_llm_settings
 from services.data_comparator import DataComparator
 from services.document_converter import convert_excel_to_markdown
-from services.field_mapping_service import build_extraction_plan
-from services.normalized_extractor import normalize_records
+from services.field_mapping_service import build_extraction_plan, build_jiuding_reference_samples
+from services.normalized_extractor import attach_record_context, normalize_records
 
 router = APIRouter()
 tasks: Dict[str, Dict[str, Any]] = {}
@@ -29,8 +32,17 @@ LOGGER = logging.getLogger("compare_tasks")
 if not LOGGER.handlers:
     file_handler = logging.FileHandler(RUNTIME_DIR / "backend.tasks.log", encoding="utf-8")
     file_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
+    stream_handler = logging.StreamHandler()
+    stream_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
     LOGGER.addHandler(file_handler)
+    LOGGER.addHandler(stream_handler)
     LOGGER.setLevel(logging.INFO)
+
+warnings.filterwarnings(
+    "ignore",
+    message="Workbook contains no default style, apply openpyxl's default",
+    category=UserWarning,
+)
 
 
 class TaskStatus(BaseModel):
@@ -78,7 +90,7 @@ def _update_task(
     )
 
 
-def _build_result_filename(result_df) -> str:
+def _build_result_filename(result_df: pd.DataFrame) -> str:
     date_for_name = ""
     if not result_df.empty and "日期" in result_df.columns:
         first_date = result_df["日期"].iloc[0]
@@ -92,13 +104,110 @@ def _build_result_filename(result_df) -> str:
     return "_".join(filename_parts) + ".xlsx"
 
 
+def _merge_normalized_frames(frames: List[pd.DataFrame]) -> pd.DataFrame:
+    if not frames:
+        return pd.DataFrame(columns=["日期", "订单号", "工厂", "型号", "公司", "数量"])
+    merged = pd.concat(frames, ignore_index=True)
+    return merged.reset_index(drop=True)
+
+
+def _normalize_optional_text(value: object) -> str | None:
+    if value is None or pd.isna(value):
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _attach_jiuding_filter_company(
+    normalized_df: pd.DataFrame,
+    *,
+    source_df: pd.DataFrame,
+    plan_mapping: Dict[str, str],
+) -> pd.DataFrame:
+    order_column = plan_mapping.get("order_no")
+    if not order_column or order_column not in source_df.columns:
+        return normalized_df
+
+    customer_column = None
+    for column in source_df.columns:
+        if "客户名称" in str(column).strip():
+            customer_column = str(column).strip()
+            break
+    if customer_column is None:
+        return normalized_df
+
+    filter_df = pd.DataFrame(
+        {
+            "单号": source_df[order_column].map(_normalize_optional_text),
+            "筛选公司": source_df[customer_column].map(_normalize_optional_text),
+        }
+    )
+    filter_df = filter_df.dropna(subset=["单号", "筛选公司"])
+    if filter_df.empty:
+        return normalized_df
+
+    filter_df = filter_df.groupby("单号", as_index=False).agg({"筛选公司": "first"})
+    return normalized_df.merge(filter_df, on="单号", how="left")
+
+
+def _process_single_excel(
+    *,
+    content: bytes,
+    filename: str,
+    role: str,
+    factory_type: str,
+    llm_settings,
+    jiuding_reference_rows: List[Dict[str, str]] | None = None,
+) -> Dict[str, Any]:
+    document = convert_excel_to_markdown(content, filename)
+    plan = build_extraction_plan(
+        file_content=content,
+        filename=filename,
+        role=role,
+        factory_type=factory_type,
+        markdown=document["markdown"],
+        preview=document["preview"],
+        llm_settings=llm_settings,
+        jiuding_reference_rows=jiuding_reference_rows,
+    )
+
+    source_df = pd.read_excel(io.BytesIO(content), dtype=str)
+    source_df.columns = [str(column).strip() for column in source_df.columns]
+    plan_mapping = plan.to_column_mapping()
+    normalized_df = normalize_records(source_df, plan_mapping)
+    if role == "jiuding":
+        normalized_df = _attach_jiuding_filter_company(
+            normalized_df,
+            source_df=source_df,
+            plan_mapping=plan_mapping,
+        )
+    source_hint = plan_mapping.get("factory")
+    normalized_df = attach_record_context(
+        normalized_df,
+        source_filename=filename,
+        source_hint=source_df[source_hint].astype(str).str.strip().iloc[0] if source_hint and source_hint in source_df.columns and not source_df.empty else None,
+    )
+
+    LOGGER.info(
+        "filename=%s role=%s extracted_columns=%s",
+        filename,
+        role,
+        plan_mapping,
+    )
+
+    return {
+        "normalized_df": normalized_df,
+        "preview": document["preview"],
+        "plan": plan.model_dump(),
+        "filename": filename,
+    }
+
+
 def _run_comparison_sync(
     *,
     task_id: str,
-    factory_content: bytes,
-    jiuding_content: bytes,
-    factory_filename: str,
-    jiuding_filename: str,
+    factory_files: List[Dict[str, Any]],
+    jiuding_files: List[Dict[str, Any]],
     factory_type: str,
     llm_overrides: Dict[str, str],
 ) -> Dict[str, Any]:
@@ -106,43 +215,38 @@ def _run_comparison_sync(
     task_llm_settings = build_task_llm_settings(default_llm_settings, **llm_overrides)
 
     _update_task(task_id, status="parsing", progress=15, message="正在解析上传文件...")
-    factory_doc = convert_excel_to_markdown(factory_content, factory_filename)
-    jiuding_doc = convert_excel_to_markdown(jiuding_content, jiuding_filename)
+    jiuding_reference_rows = build_jiuding_reference_samples([file_item["content"] for file_item in jiuding_files])
 
     _update_task(task_id, progress=35, message="AI 正在识别有效字段...")
-    factory_plan = build_extraction_plan(
-        file_content=factory_content,
-        filename=factory_filename,
-        role="factory",
-        factory_type=factory_type,
-        markdown=factory_doc["markdown"],
-        preview=factory_doc["preview"],
-        llm_settings=task_llm_settings,
-    )
-    jiuding_plan = build_extraction_plan(
-        file_content=jiuding_content,
-        filename=jiuding_filename,
-        role="jiuding",
-        factory_type=factory_type,
-        markdown=jiuding_doc["markdown"],
-        preview=jiuding_doc["preview"],
-        llm_settings=task_llm_settings,
-    )
-
-    import io
-    import pandas as pd
+    factory_processed = [
+        _process_single_excel(
+            content=file_item["content"],
+            filename=file_item["filename"],
+            role="factory",
+            factory_type=factory_type,
+            llm_settings=task_llm_settings,
+            jiuding_reference_rows=jiuding_reference_rows,
+        )
+        for file_item in factory_files
+    ]
+    jiuding_processed = [
+        _process_single_excel(
+            content=file_item["content"],
+            filename=file_item["filename"],
+            role="jiuding",
+            factory_type=factory_type,
+            llm_settings=task_llm_settings,
+            jiuding_reference_rows=None,
+        )
+        for file_item in jiuding_files
+    ]
 
     _update_task(task_id, progress=55, message="正在标准化订单数据...")
-    factory_source_df = pd.read_excel(io.BytesIO(factory_content))
-    jiuding_source_df = pd.read_excel(io.BytesIO(jiuding_content))
-    factory_source_df.columns = [str(column).strip() for column in factory_source_df.columns]
-    jiuding_source_df.columns = [str(column).strip() for column in jiuding_source_df.columns]
-
-    factory_df = normalize_records(factory_source_df, factory_plan.to_column_mapping())
-    jiuding_df = normalize_records(jiuding_source_df, jiuding_plan.to_column_mapping())
+    factory_df = _merge_normalized_frames([item["normalized_df"] for item in factory_processed])
+    jiuding_df = _merge_normalized_frames([item["normalized_df"] for item in jiuding_processed])
 
     _update_task(task_id, status="comparing", progress=75, message="正在汇总订单并核对差异...")
-    result_df = DataComparator(factory_df, jiuding_df).compare()
+    result_df = DataComparator(factory_df, jiuding_df, factory_type).compare()
 
     output_dir = "outputs"
     os.makedirs(output_dir, exist_ok=True)
@@ -158,10 +262,22 @@ def _run_comparison_sync(
         "filename": filename,
         "total_count": len(result_df),
         "artifacts": {
-            "factory_preview": factory_doc["preview"],
-            "jiuding_preview": jiuding_doc["preview"],
-            "factory_plan": factory_plan.model_dump(),
-            "jiuding_plan": jiuding_plan.model_dump(),
+            "factory_files": [
+                {
+                    "filename": item["filename"],
+                    "preview": item["preview"],
+                    "plan": item["plan"],
+                }
+                for item in factory_processed
+            ],
+            "jiuding_files": [
+                {
+                    "filename": item["filename"],
+                    "preview": item["preview"],
+                    "plan": item["plan"],
+                }
+                for item in jiuding_processed
+            ],
         },
     }
 
@@ -169,20 +285,16 @@ def _run_comparison_sync(
 async def process_comparison(
     *,
     task_id: str,
-    factory_content: bytes,
-    jiuding_content: bytes,
-    factory_filename: str,
-    jiuding_filename: str,
+    factory_files: List[Dict[str, Any]],
+    jiuding_files: List[Dict[str, Any]],
     factory_type: str,
     llm_overrides: Dict[str, str],
 ) -> Dict[str, Any]:
     return await asyncio.to_thread(
         _run_comparison_sync,
         task_id=task_id,
-        factory_content=factory_content,
-        jiuding_content=jiuding_content,
-        factory_filename=factory_filename,
-        jiuding_filename=jiuding_filename,
+        factory_files=factory_files,
+        jiuding_files=jiuding_files,
         factory_type=factory_type,
         llm_overrides=llm_overrides,
     )
@@ -191,20 +303,16 @@ async def process_comparison(
 async def _run_comparison_task(
     *,
     task_id: str,
-    factory_content: bytes,
-    jiuding_content: bytes,
-    factory_filename: str,
-    jiuding_filename: str,
+    factory_files: List[Dict[str, Any]],
+    jiuding_files: List[Dict[str, Any]],
     factory_type: str,
     llm_overrides: Dict[str, str],
 ) -> None:
     try:
         result = await process_comparison(
             task_id=task_id,
-            factory_content=factory_content,
-            jiuding_content=jiuding_content,
-            factory_filename=factory_filename,
-            jiuding_filename=jiuding_filename,
+            factory_files=factory_files,
+            jiuding_files=jiuding_files,
             factory_type=factory_type,
             llm_overrides=llm_overrides,
         )
@@ -218,16 +326,23 @@ async def _run_comparison_task(
 
 @router.post("/compare")
 async def create_comparison(
-    factory_file: UploadFile = File(...),
-    jiuding_file: UploadFile = File(...),
+    factory_files: List[UploadFile] = File(...),
+    jiuding_files: List[UploadFile] = File(...),
     factory_type: str = Form("hengyi"),
     llm_base_url: Optional[str] = Form(None),
     llm_api_key: Optional[str] = Form(None),
     llm_model: Optional[str] = Form(None),
     llm_transport: Optional[str] = Form(None),
 ):
-    _ensure_excel(factory_file.filename, "工厂侧文件")
-    _ensure_excel(jiuding_file.filename, "久鼎侧文件")
+    if not factory_files:
+        raise HTTPException(status_code=400, detail="工厂侧文件不能为空")
+    if not jiuding_files:
+        raise HTTPException(status_code=400, detail="久鼎侧文件不能为空")
+
+    for file_item in factory_files:
+        _ensure_excel(file_item.filename, "工厂侧文件")
+    for file_item in jiuding_files:
+        _ensure_excel(file_item.filename, "久鼎侧文件")
 
     task_id = str(uuid.uuid4())
     tasks[task_id] = {
@@ -238,16 +353,20 @@ async def create_comparison(
         "result": None,
     }
 
-    factory_content = await factory_file.read()
-    jiuding_content = await jiuding_file.read()
+    factory_payloads = [
+        {"filename": file_item.filename, "content": await file_item.read()}
+        for file_item in factory_files
+    ]
+    jiuding_payloads = [
+        {"filename": file_item.filename, "content": await file_item.read()}
+        for file_item in jiuding_files
+    ]
 
     asyncio.create_task(
         _run_comparison_task(
             task_id=task_id,
-            factory_content=factory_content,
-            jiuding_content=jiuding_content,
-            factory_filename=factory_file.filename,
-            jiuding_filename=jiuding_file.filename,
+            factory_files=factory_payloads,
+            jiuding_files=jiuding_payloads,
             factory_type=factory_type,
             llm_overrides={
                 "base_url": llm_base_url or "",

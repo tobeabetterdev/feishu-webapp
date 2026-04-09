@@ -4,6 +4,7 @@ FROM node:18-alpine as build
 WORKDIR /app
 
 ARG NPM_REGISTRY=https://registry.npmmirror.com
+ARG VITE_API_URL=/api
 
 # 复制 package 文件
 COPY package*.json ./
@@ -16,7 +17,7 @@ RUN npm config set registry ${NPM_REGISTRY} \
 COPY . .
 
 # 构建应用
-RUN npm run build
+RUN VITE_API_URL=${VITE_API_URL} npm run build
 
 # 生产阶段
 FROM nginx:alpine

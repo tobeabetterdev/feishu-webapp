@@ -1,4 +1,4 @@
-const API_BASE_URL = 'http://localhost:8000/api'
+const API_BASE_URL = import.meta.env.VITE_API_URL || '/api'
 
 export interface CompareResponse {
   task_id: string
@@ -20,13 +20,13 @@ export interface TaskResult {
 }
 
 export async function createComparison(
-  factoryFile: File,
-  jiudingFile: File,
+  factoryFiles: File[],
+  jiudingFiles: File[],
   factoryType: string,
 ): Promise<CompareResponse> {
   const formData = new FormData()
-  formData.append('factory_file', factoryFile)
-  formData.append('jiuding_file', jiudingFile)
+  factoryFiles.forEach((file) => formData.append('factory_files', file))
+  jiudingFiles.forEach((file) => formData.append('jiuding_files', file))
   formData.append('factory_type', factoryType)
 
   const response = await fetch(`${API_BASE_URL}/compare`, {

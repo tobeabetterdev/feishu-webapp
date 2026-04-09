@@ -20,12 +20,12 @@ interface DisplayRow {
 
 const FIELD_ALIASES = {
   date: ['日期', 'date'],
-  orderNo: ['订单号', 'order_no', 'orderNo'],
+  orderNo: ['单号', '订单号', 'order_no', 'orderNo'],
   factory: ['工厂', 'factory'],
   model: ['型号', 'model'],
   company: ['公司', 'company'],
-  customerQty: ['工厂出库数量', 'customer_qty', 'customerQty'],
-  jiudingQty: ['久鼎出库数量', 'jiuding_qty', 'jiudingQty'],
+  customerQty: ['客户出库数', '工厂出库数量', 'customer_qty', 'customerQty'],
+  jiudingQty: ['久鼎出库数', '久鼎出库数量', 'jiuding_qty', 'jiudingQty'],
   pendingQty: ['待处理数量', 'pending_qty', 'pendingQty'],
 } as const
 

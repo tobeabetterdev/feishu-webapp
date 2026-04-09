@@ -70,8 +70,8 @@ function resolveStage(status: string, message: string): StageKey {
 export default function OrderComparison() {
   const navigate = useNavigate()
   const [factoryType, setFactoryType] = useState<FactoryType>('hengyi')
-  const [factoryFile, setFactoryFile] = useState<File | null>(null)
-  const [jiudingFile, setJiudingFile] = useState<File | null>(null)
+  const [factoryFiles, setFactoryFiles] = useState<File[]>([])
+  const [jiudingFiles, setJiudingFiles] = useState<File[]>([])
   const [progress, setProgress] = useState(0)
   const [progressMessage, setProgressMessage] = useState('')
   const [results, setResults] = useState<ComparisonResult[]>([])
@@ -119,8 +119,8 @@ export default function OrderComparison() {
 
   const resetPageState = (nextFactoryType: FactoryType) => {
     setFactoryType(nextFactoryType)
-    setFactoryFile(null)
-    setJiudingFile(null)
+    setFactoryFiles([])
+    setJiudingFiles([])
     setResults([])
     setShowProgress(false)
     setTaskId(null)
@@ -134,8 +134,21 @@ export default function OrderComparison() {
     resetPageState(type)
   }
 
+  const appendFiles = (current: File[], incoming: File[]) => {
+    const keySet = new Set(current.map((file) => `${file.name}-${file.size}-${file.lastModified}`))
+    const merged = [...current]
+    incoming.forEach((file) => {
+      const key = `${file.name}-${file.size}-${file.lastModified}`
+      if (!keySet.has(key)) {
+        merged.push(file)
+        keySet.add(key)
+      }
+    })
+    return merged
+  }
+
   const handleCompare = async () => {
-    if (!factoryFile || !jiudingFile || isSubmitting) return
+    if (factoryFiles.length === 0 || jiudingFiles.length === 0 || isSubmitting) return
 
     setIsSubmitting(true)
     setShowProgress(true)
@@ -147,7 +160,7 @@ export default function OrderComparison() {
     setTaskId(null)
 
     try {
-      const { task_id } = await createComparison(factoryFile, jiudingFile, factoryType)
+      const { task_id } = await createComparison(factoryFiles, jiudingFiles, factoryType)
       setTaskId(task_id)
       updateStage('pending', '任务已创建，等待系统处理...', 5)
 
@@ -199,7 +212,7 @@ export default function OrderComparison() {
       setIsSubmitting(false)
       const errorMessage = error instanceof Error ? error.message : '处理失败'
       setProgressMessage(errorMessage)
-      alert(`核对失败: ${errorMessage}\n请确认后端服务已启动在 http://localhost:8000`)
+      alert(`核对失败: ${errorMessage}`)
     }
   }
 
@@ -245,7 +258,7 @@ export default function OrderComparison() {
                     <h1 className="text-3xl font-semibold tracking-tight text-slate-950 md:text-4xl">
                       订单核对
                     </h1>
-                    <p className="mt-3 text-sm text-slate-500 md:text-base">上传，识别，汇总，输出。</p>
+                    <p className="mt-3 text-sm text-slate-500 md:text-base">多文件识别，合并核对，输出结果。</p>
                   </div>
                 </div>
 
@@ -326,18 +339,18 @@ export default function OrderComparison() {
 
         <section className="grid grid-cols-1 gap-4 xl:grid-cols-2 xl:gap-6">
           <FileUpload
-            label={`${currentRole.label}数据`}
+            label="工厂数据"
             description={currentRole.label}
-            onFileSelect={setFactoryFile}
-            onFileRemove={() => setFactoryFile(null)}
-            selectedFile={factoryFile}
+            onFilesSelect={(files) => setFactoryFiles((current) => appendFiles(current, files))}
+            onFileRemove={(index) => setFactoryFiles((current) => current.filter((_, currentIndex) => currentIndex !== index))}
+            selectedFiles={factoryFiles}
           />
           <FileUpload
             label="久鼎数据"
             description="久鼎"
-            onFileSelect={setJiudingFile}
-            onFileRemove={() => setJiudingFile(null)}
-            selectedFile={jiudingFile}
+            onFilesSelect={(files) => setJiudingFiles((current) => appendFiles(current, files))}
+            onFileRemove={(index) => setJiudingFiles((current) => current.filter((_, currentIndex) => currentIndex !== index))}
+            selectedFiles={jiudingFiles}
           />
         </section>
 
@@ -346,13 +359,13 @@ export default function OrderComparison() {
             <div className="space-y-2">
               <p className="text-xs font-semibold tracking-[0.24em] text-slate-400">AI 任务</p>
               <h2 className="text-2xl font-semibold tracking-tight text-slate-950">开始核对</h2>
-              <p className="text-sm text-slate-500">双文件就绪后即可执行。</p>
+              <p className="text-sm text-slate-500">两侧文件就绪后即可执行。</p>
             </div>
 
             <button
               type="button"
               onClick={handleCompare}
-              disabled={!factoryFile || !jiudingFile || isSubmitting}
+              disabled={factoryFiles.length === 0 || jiudingFiles.length === 0 || isSubmitting}
               className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-[linear-gradient(135deg,#f3a74f,#0f8b8d)] px-6 py-4 text-base font-semibold text-white shadow-[0_18px_40px_-20px_rgba(15,139,141,0.6)] transition hover:brightness-105 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-white/80 disabled:shadow-none md:w-auto md:min-w-[220px]"
             >
               {isSubmitting ? <LoaderCircle className="h-5 w-5 animate-spin" /> : null}

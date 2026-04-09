@@ -124,7 +124,7 @@ def test_normalize_records_matches_columns_after_whitespace_normalization():
         [
             {
                 "交货单号": "A-001",
-                "售达方": "江苏",
+                "送达方": "江苏",
                 "托盘类型": "塑托",
                 "久鼎托盘_x000D_\n数量": 12,
             }
@@ -132,9 +132,9 @@ def test_normalize_records_matches_columns_after_whitespace_normalization():
     )
     plan = {
         "order_no": "交货单号",
-        "factory": "售达方",
+        "factory": "送达方",
         "model": "托盘类型",
-        "company": "售达方",
+        "company": "送达方",
         "quantity": "久鼎托盘_x000D_ 数量",
     }
 
@@ -142,3 +142,73 @@ def test_normalize_records_matches_columns_after_whitespace_normalization():
 
     assert result.iloc[0]["单号"] == "A-001"
     assert result.iloc[0]["数量"] == 12
+
+
+def test_normalize_records_drops_summary_rows_with_missing_business_fields():
+    source_df = pd.DataFrame(
+        [
+            {
+                "订单号": "A-001",
+                "工厂出库数量": 10,
+            },
+            {
+                "订单号": None,
+                "工厂出库数量": "合计",
+            },
+        ]
+    )
+    plan = {
+        "order_no": "订单号",
+        "quantity": "工厂出库数量",
+    }
+
+    result = normalize_records(source_df, plan)
+
+    assert len(result) == 1
+    assert result.iloc[0]["单号"] == "A-001"
+
+
+def test_normalize_records_only_keeps_clear_model_keywords():
+    source_df = pd.DataFrame(
+        [
+            {
+                "订单号": "A-001",
+                "型号列": "350dtex/96f",
+                "数量列": 10,
+            },
+            {
+                "订单号": "A-002",
+                "型号列": "超细旦 POY 用品",
+                "数量列": 8,
+            },
+        ]
+    )
+    plan = {
+        "order_no": "订单号",
+        "model": "型号列",
+        "quantity": "数量列",
+    }
+
+    result = normalize_records(source_df, plan)
+
+    assert result.iloc[0]["型号"] is None
+    assert result.iloc[1]["型号"] == "POY"
+
+
+def test_normalize_records_preserves_leading_zero_order_numbers():
+    source_df = pd.DataFrame(
+        [
+            {
+                "订单号": "0088396406",
+                "数量列": 10,
+            }
+        ]
+    )
+    plan = {
+        "order_no": "订单号",
+        "quantity": "数量列",
+    }
+
+    result = normalize_records(source_df, plan)
+
+    assert result.iloc[0]["单号"] == "0088396406"
