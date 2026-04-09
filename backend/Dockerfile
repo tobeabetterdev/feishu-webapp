@@ -4,14 +4,20 @@ WORKDIR /app
 
 ARG PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
 ARG PIP_TRUSTED_HOST=pypi.tuna.tsinghua.edu.cn
+ARG PIP_FALLBACK_INDEX_URL=https://pypi.org/simple
+ARG PIP_FALLBACK_TRUSTED_HOST=pypi.org
 
 # 安装依赖
 COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir \
-    -i ${PIP_INDEX_URL} \
-    --trusted-host ${PIP_TRUSTED_HOST} \
-    -r requirements.txt
+    && (pip install --no-cache-dir \
+        -i ${PIP_INDEX_URL} \
+        --trusted-host ${PIP_TRUSTED_HOST} \
+        -r requirements.txt \
+        || pip install --no-cache-dir \
+        -i ${PIP_FALLBACK_INDEX_URL} \
+        --trusted-host ${PIP_FALLBACK_TRUSTED_HOST} \
+        -r requirements.txt)
 
 # 复制源代码
 COPY . .
