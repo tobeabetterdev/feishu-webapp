@@ -28,18 +28,32 @@ def _load_factory_groups() -> dict[str, Any]:
 
 class DataComparator:
     def __init__(self, factory_df: pd.DataFrame, jiuding_df: pd.DataFrame, factory_type: str):
-        self.factory_df = factory_df.copy()
-        self.jiuding_df = jiuding_df.copy()
+        self.factory_df = self._with_legacy_aliases(factory_df.copy())
+        self.jiuding_df = self._with_legacy_aliases(jiuding_df.copy())
         self.factory_type = factory_type
         self.factory_groups = _load_factory_groups()
         current_group = self.factory_groups.get(factory_type, {})
         self.allowed_customers = set(current_group.get("customers", []))
         self.factory_short_names = dict(current_group.get("customer_short_names", {}))
+        self.filename_aliases = dict(current_group.get("filename_aliases", {}))
         self.short_name_values = list(self.factory_short_names.values())
         self.short_name_to_customer = {
             short_name: customer_name
             for customer_name, short_name in self.factory_short_names.items()
         }
+
+    @staticmethod
+    def _with_legacy_aliases(df: pd.DataFrame) -> pd.DataFrame:
+        rename_map = {}
+        if "订单号" in df.columns and "单号" not in df.columns:
+            rename_map["订单号"] = "单号"
+        if "工厂量" in df.columns and "客户出库数" not in df.columns:
+            rename_map["工厂量"] = "客户出库数"
+        if "久鼎量" in df.columns and "久鼎出库数" not in df.columns:
+            rename_map["久鼎量"] = "久鼎出库数"
+        if "差量" in df.columns and "待处理数量" not in df.columns:
+            rename_map["差量"] = "待处理数量"
+        return df.rename(columns=rename_map)
 
     def _map_factory_short_name(self, value: object) -> str | None:
         if value is None or pd.isna(value):
@@ -70,12 +84,8 @@ class DataComparator:
         text = str(filename).strip()
         if not text:
             return None
-        alias_map = {
-            "恒逸高新": ("恒逸高新", "高新"),
-            "双兔": ("双兔",),
-            "海宁恒逸": ("海宁恒逸", "海宁"),
-        }
-        for short_name, aliases in alias_map.items():
+
+        for short_name, aliases in self.filename_aliases.items():
             if any(alias in text for alias in aliases):
                 return short_name
         return None
@@ -152,7 +162,7 @@ class DataComparator:
         return working[company_series.isin(effective_customers)].reset_index(drop=True)
 
     def _aggregate_rows(self, df: pd.DataFrame, quantity_column: str) -> pd.DataFrame:
-        working = df.copy()
+        working = self._with_legacy_aliases(df.copy())
         working = working.dropna(subset=["单号"])
         working["单号"] = working["单号"].map(lambda value: str(value).strip())
         working = working[working["单号"] != ""]
@@ -172,8 +182,7 @@ class DataComparator:
         if "来源工厂线索" in working.columns:
             aggregate_map["来源工厂线索"] = self._first_non_empty
 
-        aggregated = working.groupby("单号", as_index=False).agg(aggregate_map)
-        return aggregated
+        return working.groupby("单号", as_index=False).agg(aggregate_map)
 
     def compare(self) -> pd.DataFrame:
         factory_rows = self._aggregate_rows(

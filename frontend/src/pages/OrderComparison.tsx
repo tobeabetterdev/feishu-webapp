@@ -36,7 +36,6 @@ const ROLE_META: Record<
   FactoryType,
   {
     label: string
-    short: string
     icon: typeof Shapes
     tone: string
     glow: string
@@ -44,14 +43,12 @@ const ROLE_META: Record<
 > = {
   hengyi: {
     label: '恒逸',
-    short: '恒逸',
     icon: Shapes,
     tone: 'from-[#f6c27a] via-[#f3a74f] to-[#ef8b33]',
     glow: 'shadow-[0_18px_40px_-24px_rgba(243,167,79,0.72)]',
   },
   xinfengming: {
     label: '新凤鸣',
-    short: '新凤鸣',
     icon: Warehouse,
     tone: 'from-[#61c7c8] via-[#1fa7a8] to-[#0f7f82]',
     glow: 'shadow-[0_18px_40px_-24px_rgba(15,139,141,0.72)]',
@@ -291,7 +288,7 @@ export default function OrderComparison() {
                     <div
                       className={`inline-flex items-center rounded-full bg-gradient-to-r px-3 py-1 text-xs font-semibold text-white ${currentRole.tone} ${currentRole.glow}`}
                     >
-                      {currentRole.short}
+                      {currentRole.label}
                     </div>
                   </div>
 
@@ -321,11 +318,8 @@ export default function OrderComparison() {
                               >
                                 <Icon size={18} />
                               </span>
-                              <span className={`text-[11px] font-semibold ${active ? 'text-white/80' : 'text-slate-400'}`}>
-                                {option.short}
-                              </span>
                             </div>
-                            <p className="mt-4 text-sm font-semibold">{option.label}</p>
+                            <p className="mt-5 text-lg font-semibold tracking-[0.02em]">{option.label}</p>
                           </button>
                         )
                       },

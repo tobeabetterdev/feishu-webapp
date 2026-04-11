@@ -1,33 +1,41 @@
-import pytest
+from io import BytesIO
+
+import pandas as pd
+
 from services.excel_parser import ExcelParser
 
+
+def _to_excel_bytes(df: pd.DataFrame) -> bytes:
+    buffer = BytesIO()
+    df.to_excel(buffer, index=False)
+    return buffer.getvalue()
+
+
 def test_parse_hengyi():
-    """测试恒逸格式解析"""
-    # 使用实际文件测试
-    with open(r'D:\Workspaces\Projects\code-cli\skillls\示例\工厂数据\SAP 导出数据.xlsx', 'rb') as f:
-        content = f.read()
+    source_df = pd.DataFrame([{"送达方": "测试客户", "交货单": "0088395730"}])
+    content = _to_excel_bytes(source_df)
 
     df = ExcelParser.parse_hengyi(content)
-    assert len(df) > 0
-    assert '送达方' in df.columns
-    assert '交货单' in df.columns
+    assert len(df) == 1
+    assert "送达方" in df.columns
+    assert "交货单" in df.columns
+
 
 def test_parse_xinfengming():
-    """测试新凤鸣格式解析"""
-    with open(r'D:\Workspaces\Projects\code-cli\skillls\示例\工厂数据\新凤鸣工厂20260405.XLSX', 'rb') as f:
-        content = f.read()
+    source_df = pd.DataFrame([{"客户名称": "测试客户", "交货单号": "A-001"}])
+    content = _to_excel_bytes(source_df)
 
     df = ExcelParser.parse_xinfengming(content)
-    assert len(df) > 0
-    assert '客户名称' in df.columns
-    assert '交货单号' in df.columns
+    assert len(df) == 1
+    assert "客户名称" in df.columns
+    assert "交货单号" in df.columns
+
 
 def test_parse_jiuding():
-    """测试久鼎格式解析"""
-    with open(r'D:\Workspaces\Projects\code-cli\skillls\示例\久鼎数据\会员托盘租赁报表fd38e5f9bfe644f2861401342f00ac3d.xlsx', 'rb') as f:
-        content = f.read()
+    source_df = pd.DataFrame([{"出库单号": "H-001", "会员名称": "测试会员"}])
+    content = _to_excel_bytes(source_df)
 
     df = ExcelParser.parse_jiuding(content)
-    assert len(df) > 0
-    assert '出库单号' in df.columns
-    assert '会员名称' in df.columns
+    assert len(df) == 1
+    assert "出库单号" in df.columns
+    assert "会员名称" in df.columns

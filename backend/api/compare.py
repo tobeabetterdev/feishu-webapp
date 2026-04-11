@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import io
 import json
 import logging
@@ -14,14 +15,20 @@ from typing import Any, Dict, List, Optional
 
 import pandas as pd
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from config.settings import build_task_llm_settings, load_llm_settings
-from services.data_comparator import DataComparator
 from services.document_converter import convert_excel_to_markdown
 from services.field_mapping_service import build_extraction_plan, build_jiuding_reference_samples
+from services.hengyi_comparison import (
+    HengyiComparisonError,
+    compare_hengyi_data,
+    parse_hengyi_factory_data,
+    parse_hengyi_jiuding_data,
+)
 from services.normalized_extractor import attach_record_context, normalize_records
+from services.xinfengming_comparison import compare_xinfengming_data
 
 router = APIRouter()
 tasks: Dict[str, Dict[str, Any]] = {}
@@ -43,6 +50,12 @@ warnings.filterwarnings(
     message="Workbook contains no default style, apply openpyxl's default",
     category=UserWarning,
 )
+
+HENGYI_ANOMALY_SHEET_NAMES = {
+    "工厂侧待补录": "工厂侧待补录",
+    "久鼎侧待补录": "久鼎侧待补录",
+    "数量差异待核实": "数量差异待核实",
+}
 
 
 class TaskStatus(BaseModel):
@@ -92,10 +105,12 @@ def _update_task(
 
 def _build_result_filename(result_df: pd.DataFrame) -> str:
     date_for_name = ""
-    if not result_df.empty and "日期" in result_df.columns:
-        first_date = result_df["日期"].iloc[0]
-        if first_date is not None and str(first_date).strip():
-            date_for_name = str(first_date).strip().replace("/", "-")
+    for column_name in ("日期", "过账日期(工厂)", "订单日期(久鼎)"):
+        if not result_df.empty and column_name in result_df.columns:
+            first_date = result_df[column_name].dropna().iloc[0] if not result_df[column_name].dropna().empty else None
+            if first_date is not None and str(first_date).strip():
+                date_for_name = str(first_date).strip().replace("/", "-")
+                break
 
     filename_parts = ["订单核对"]
     if date_for_name:
@@ -104,11 +119,170 @@ def _build_result_filename(result_df: pd.DataFrame) -> str:
     return "_".join(filename_parts) + ".xlsx"
 
 
-def _merge_normalized_frames(frames: List[pd.DataFrame]) -> pd.DataFrame:
-    if not frames:
-        return pd.DataFrame(columns=["日期", "订单号", "工厂", "型号", "公司", "数量"])
-    merged = pd.concat(frames, ignore_index=True)
-    return merged.reset_index(drop=True)
+def _first_non_empty_value(series: pd.Series):
+    for value in series:
+        if value is None or pd.isna(value):
+            continue
+        if isinstance(value, str) and not value.strip():
+            continue
+        return value
+    return None
+
+
+def _build_hengyi_order_key(row: pd.Series) -> str:
+    for column_name in ("交货单(工厂)", "出库单号(久鼎)"):
+        value = row.get(column_name)
+        if value is not None and not pd.isna(value) and str(value).strip():
+            return str(value).strip()
+    return f"ROW-{row.name}"
+
+
+def _build_hengyi_summary_sheet(result_df: pd.DataFrame) -> pd.DataFrame:
+    working = result_df.copy()
+    working["订单号"] = working.apply(_build_hengyi_order_key, axis=1)
+    if "托盘数(工厂)" in working.columns:
+        working["托盘数(工厂)"] = working["托盘数(工厂)"].fillna(0)
+
+    summary_df = (
+        working.groupby(["异常类型", "订单号"], as_index=False)
+        .agg(
+            {
+                "工厂(工厂)": _first_non_empty_value,
+                "会员名称(久鼎)": _first_non_empty_value,
+                "送达方(工厂)": _first_non_empty_value,
+                "托盘数(工厂)": "sum",
+                "实际出库数量(久鼎)": _first_non_empty_value,
+                "差量": _first_non_empty_value,
+            }
+        )
+        .rename(
+            columns={
+                "工厂(工厂)": "工厂",
+                "会员名称(久鼎)": "会员名称(久鼎)",
+                "送达方(工厂)": "送达方(工厂)",
+                "托盘数(工厂)": "工厂托盘合计",
+                "实际出库数量(久鼎)": "久鼎数量",
+            }
+        )
+    )
+    summary_df["公司"] = summary_df["会员名称(久鼎)"].combine_first(summary_df["送达方(工厂)"])
+    summary_df = summary_df[
+        ["异常类型", "订单号", "工厂", "公司", "工厂托盘合计", "久鼎数量", "差量"]
+    ]
+    anomaly_order = {name: index for index, name in enumerate(HENGYI_ANOMALY_SHEET_NAMES.keys())}
+    summary_df["__sort_order"] = summary_df["异常类型"].map(anomaly_order).fillna(len(anomaly_order))
+    summary_df = summary_df.sort_values(["__sort_order", "订单号"], kind="stable").drop(columns="__sort_order")
+    summary_df = summary_df.reset_index(drop=True)
+    return summary_df
+
+
+def _write_sheet(writer: pd.ExcelWriter, sheet_name: str, df: pd.DataFrame) -> None:
+    export_df = df.copy().astype(object)
+    export_df = export_df.where(pd.notna(export_df), None)
+    export_df.to_excel(writer, sheet_name=sheet_name, index=False)
+
+
+def _merge_hengyi_quantity_sheet(writer: pd.ExcelWriter, sheet_name: str, df: pd.DataFrame) -> None:
+    if df.empty:
+        return
+
+    worksheet = writer.book[sheet_name]
+    columns = list(df.columns)
+    merge_columns = [
+        "异常类型",
+        "订单日期(久鼎)",
+        "出库单号(久鼎)",
+        "客户名称(久鼎)",
+        "会员名称(久鼎)",
+        "产品类型(久鼎)",
+        "实际出库数量(久鼎)",
+        "差量",
+    ]
+    column_index_map = {column_name: index + 1 for index, column_name in enumerate(columns)}
+
+    order_keys = df.apply(_build_hengyi_order_key, axis=1).tolist()
+    start = 0
+    while start < len(order_keys):
+        end = start
+        while end + 1 < len(order_keys) and order_keys[end + 1] == order_keys[start]:
+            end += 1
+
+        if end > start:
+            for column_name in merge_columns:
+                if column_name not in column_index_map:
+                    continue
+                column_index = column_index_map[column_name]
+                worksheet.merge_cells(
+                    start_row=start + 2,
+                    start_column=column_index,
+                    end_row=end + 2,
+                    end_column=column_index,
+                )
+        start = end + 1
+
+
+def _save_hengyi_result_workbook(file_path: str, result_df: pd.DataFrame) -> None:
+    summary_df = _build_hengyi_summary_sheet(result_df)
+
+    with pd.ExcelWriter(file_path, engine="openpyxl") as writer:
+        _write_sheet(writer, "异常汇总", summary_df)
+
+        for anomaly_type, sheet_name in HENGYI_ANOMALY_SHEET_NAMES.items():
+            filtered_df = result_df[result_df["异常类型"] == anomaly_type].reset_index(drop=True)
+            _write_sheet(writer, sheet_name, filtered_df)
+            if anomaly_type == "数量差异待核实":
+                _merge_hengyi_quantity_sheet(writer, sheet_name, filtered_df)
+
+
+def _build_hengyi_result_bytes(result_df: pd.DataFrame) -> bytes:
+    buffer = io.BytesIO()
+    summary_df = _build_hengyi_summary_sheet(result_df)
+
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        _write_sheet(writer, "异常汇总", summary_df)
+
+        for anomaly_type, sheet_name in HENGYI_ANOMALY_SHEET_NAMES.items():
+            filtered_df = result_df[result_df["异常类型"] == anomaly_type].reset_index(drop=True)
+            _write_sheet(writer, sheet_name, filtered_df)
+            if anomaly_type == "数量差异待核实":
+                _merge_hengyi_quantity_sheet(writer, sheet_name, filtered_df)
+
+    return buffer.getvalue()
+
+
+def _build_xinfengming_result_bytes(result_df: pd.DataFrame) -> bytes:
+    buffer = io.BytesIO()
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        result_df.to_excel(writer, index=False)
+    return buffer.getvalue()
+
+
+def _is_hengyi_result(result_df: pd.DataFrame, artifacts: Dict[str, Any]) -> bool:
+    if artifacts.get("factory_type") == "hengyi":
+        return True
+    return "异常类型" in result_df.columns
+
+
+def _save_result(
+    *,
+    result_df: pd.DataFrame,
+    artifacts: Dict[str, Any],
+) -> Dict[str, Any]:
+    filename = _build_result_filename(result_df)
+    if _is_hengyi_result(result_df, artifacts):
+        download_bytes = _build_hengyi_result_bytes(result_df)
+    else:
+        download_bytes = _build_xinfengming_result_bytes(result_df)
+
+    download_token = base64.b64encode(download_bytes).decode("ascii")
+
+    return {
+        "data": result_df.to_dict(orient="records"),
+        "filename": filename,
+        "total_count": len(result_df),
+        "download_token": download_token,
+        "artifacts": artifacts,
+    }
 
 
 def _normalize_optional_text(value: object) -> str | None:
@@ -124,6 +298,10 @@ def _attach_jiuding_filter_company(
     source_df: pd.DataFrame,
     plan_mapping: Dict[str, str],
 ) -> pd.DataFrame:
+    normalized_order_column = "订单号" if "订单号" in normalized_df.columns else "单号" if "单号" in normalized_df.columns else None
+    if normalized_order_column is None:
+        return normalized_df
+
     order_column = plan_mapping.get("order_no")
     if not order_column or order_column not in source_df.columns:
         return normalized_df
@@ -138,16 +316,16 @@ def _attach_jiuding_filter_company(
 
     filter_df = pd.DataFrame(
         {
-            "单号": source_df[order_column].map(_normalize_optional_text),
+            normalized_order_column: source_df[order_column].map(_normalize_optional_text),
             "筛选公司": source_df[customer_column].map(_normalize_optional_text),
         }
     )
-    filter_df = filter_df.dropna(subset=["单号", "筛选公司"])
+    filter_df = filter_df.dropna(subset=[normalized_order_column, "筛选公司"])
     if filter_df.empty:
         return normalized_df
 
-    filter_df = filter_df.groupby("单号", as_index=False).agg({"筛选公司": "first"})
-    return normalized_df.merge(filter_df, on="单号", how="left")
+    filter_df = filter_df.groupby(normalized_order_column, as_index=False).agg({"筛选公司": "first"})
+    return normalized_df.merge(filter_df, on=normalized_order_column, how="left")
 
 
 def _process_single_excel(
@@ -185,14 +363,11 @@ def _process_single_excel(
     normalized_df = attach_record_context(
         normalized_df,
         source_filename=filename,
-        source_hint=source_df[source_hint].astype(str).str.strip().iloc[0] if source_hint and source_hint in source_df.columns and not source_df.empty else None,
-    )
-
-    LOGGER.info(
-        "filename=%s role=%s extracted_columns=%s",
-        filename,
-        role,
-        plan_mapping,
+        source_hint=(
+            source_df[source_hint].astype(str).str.strip().iloc[0]
+            if source_hint and source_hint in source_df.columns and not source_df.empty
+            else None
+        ),
     )
 
     return {
@@ -203,7 +378,92 @@ def _process_single_excel(
     }
 
 
-def _run_comparison_sync(
+def _run_hengyi_comparison_sync(
+    *,
+    task_id: str,
+    factory_files: List[Dict[str, Any]],
+    jiuding_files: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    _update_task(task_id, status="parsing", progress=15, message="正在解析恒逸工厂数据...")
+
+    parsed_factory_files = []
+    selected_short_names: set[str] = set()
+    for file_item in factory_files:
+        source_df = pd.read_excel(io.BytesIO(file_item["content"]), dtype=str)
+        parsed_df = parse_hengyi_factory_data(source_df, source_filename=file_item["filename"])
+        selected_short_names.update(
+            short_name
+            for short_name in parsed_df["工厂"].dropna().tolist()
+            if str(short_name).strip()
+        )
+        LOGGER.info(
+            "hengyi_factory filename=%s columns=%s selected_factories=%s",
+            file_item["filename"],
+            ["过账日期", "送达方", "交货单", "车牌号", "托盘数", "工厂"],
+            sorted(selected_short_names),
+        )
+        parsed_factory_files.append({"filename": file_item["filename"], "parsed_df": parsed_df})
+
+    _update_task(task_id, progress=45, message="正在筛选久鼎数据...")
+    parsed_jiuding_files = []
+    for file_item in jiuding_files:
+        source_df = pd.read_excel(io.BytesIO(file_item["content"]), dtype=str)
+        parsed_df = parse_hengyi_jiuding_data(
+            source_df,
+            selected_factory_short_names=selected_short_names or None,
+        )
+        LOGGER.info(
+            "hengyi_jiuding filename=%s columns=%s selected_factories=%s",
+            file_item["filename"],
+            ["订单日期", "出库单号", "会员名称", "客户名称", "产品类型", "实际出库数量"],
+            sorted(selected_short_names),
+        )
+        parsed_jiuding_files.append({"filename": file_item["filename"], "parsed_df": parsed_df})
+
+    factory_df = pd.concat(
+        [item["parsed_df"] for item in parsed_factory_files],
+        ignore_index=True,
+    ) if parsed_factory_files else pd.DataFrame()
+    jiuding_df = pd.concat(
+        [item["parsed_df"] for item in parsed_jiuding_files],
+        ignore_index=True,
+    ) if parsed_jiuding_files else pd.DataFrame()
+
+    _update_task(task_id, status="comparing", progress=75, message="正在汇总恒逸异常订单...")
+    result_df = compare_hengyi_data(factory_df, jiuding_df)
+
+    _update_task(task_id, progress=90, message="正在生成结果文件...")
+    return _save_result(
+        result_df=result_df,
+        artifacts={
+            "factory_type": "hengyi",
+            "factory_files": [
+                {
+                    "filename": item["filename"],
+                    "preview": "",
+                    "plan": {
+                        "mode": "fixed_columns",
+                        "fields": ["过账日期", "送达方", "交货单", "车牌号", "托盘数", "工厂"],
+                    },
+                }
+                for item in parsed_factory_files
+            ],
+            "jiuding_files": [
+                {
+                    "filename": item["filename"],
+                    "preview": "",
+                    "plan": {
+                        "mode": "fixed_columns",
+                        "fields": ["订单日期", "出库单号", "会员名称", "客户名称", "产品类型", "实际出库数量"],
+                    },
+                }
+                for item in parsed_jiuding_files
+            ],
+        },
+    )
+
+
+def _run_xinfengming_comparison_sync(
     *,
     task_id: str,
     factory_files: List[Dict[str, Any]],
@@ -218,68 +478,46 @@ def _run_comparison_sync(
     jiuding_reference_rows = build_jiuding_reference_samples([file_item["content"] for file_item in jiuding_files])
 
     _update_task(task_id, progress=35, message="AI 正在识别有效字段...")
-    factory_processed = [
-        _process_single_excel(
-            content=file_item["content"],
-            filename=file_item["filename"],
-            role="factory",
-            factory_type=factory_type,
-            llm_settings=task_llm_settings,
-            jiuding_reference_rows=jiuding_reference_rows,
-        )
-        for file_item in factory_files
-    ]
-    jiuding_processed = [
-        _process_single_excel(
-            content=file_item["content"],
-            filename=file_item["filename"],
-            role="jiuding",
-            factory_type=factory_type,
-            llm_settings=task_llm_settings,
-            jiuding_reference_rows=None,
-        )
-        for file_item in jiuding_files
-    ]
-
-    _update_task(task_id, progress=55, message="正在标准化订单数据...")
-    factory_df = _merge_normalized_frames([item["normalized_df"] for item in factory_processed])
-    jiuding_df = _merge_normalized_frames([item["normalized_df"] for item in jiuding_processed])
+    comparison_payload = compare_xinfengming_data(
+        factory_files=factory_files,
+        jiuding_files=jiuding_files,
+        factory_type=factory_type,
+        llm_settings=task_llm_settings,
+        jiuding_reference_rows=jiuding_reference_rows,
+    )
 
     _update_task(task_id, status="comparing", progress=75, message="正在汇总订单并核对差异...")
-    result_df = DataComparator(factory_df, jiuding_df, factory_type).compare()
-
-    output_dir = "outputs"
-    os.makedirs(output_dir, exist_ok=True)
+    result_df = comparison_payload["result_df"]
 
     _update_task(task_id, progress=90, message="正在生成结果文件...")
-    filename = _build_result_filename(result_df)
-    file_path = os.path.join(output_dir, filename)
-    result_df.to_excel(file_path, index=False)
+    return _save_result(
+        result_df=result_df,
+        artifacts=comparison_payload["artifacts"],
+    )
 
-    return {
-        "data": result_df.to_dict(orient="records"),
-        "file_path": file_path,
-        "filename": filename,
-        "total_count": len(result_df),
-        "artifacts": {
-            "factory_files": [
-                {
-                    "filename": item["filename"],
-                    "preview": item["preview"],
-                    "plan": item["plan"],
-                }
-                for item in factory_processed
-            ],
-            "jiuding_files": [
-                {
-                    "filename": item["filename"],
-                    "preview": item["preview"],
-                    "plan": item["plan"],
-                }
-                for item in jiuding_processed
-            ],
-        },
-    }
+
+def _run_comparison_sync(
+    *,
+    task_id: str,
+    factory_files: List[Dict[str, Any]],
+    jiuding_files: List[Dict[str, Any]],
+    factory_type: str,
+    llm_overrides: Dict[str, str],
+) -> Dict[str, Any]:
+    if factory_type == "hengyi":
+        return _run_hengyi_comparison_sync(
+            task_id=task_id,
+            factory_files=factory_files,
+            jiuding_files=jiuding_files,
+        )
+
+    return _run_xinfengming_comparison_sync(
+        task_id=task_id,
+        factory_files=factory_files,
+        jiuding_files=jiuding_files,
+        factory_type=factory_type,
+        llm_overrides=llm_overrides,
+    )
 
 
 async def process_comparison(
@@ -318,6 +556,9 @@ async def _run_comparison_task(
         )
         tasks[task_id]["result"] = _clean_data(result)
         _update_task(task_id, status="completed", progress=100, message="比对完成")
+    except HengyiComparisonError as exc:
+        _update_task(task_id, status="failed", message=f"处理失败: {exc}")
+        LOGGER.exception("task=%s failed", task_id)
     except Exception as exc:
         _update_task(task_id, status="failed", message=f"处理失败: {exc}")
         LOGGER.exception("task=%s failed", task_id)
@@ -410,15 +651,17 @@ async def download_result(task_id: str):
     if tasks[task_id]["status"] != "completed":
         raise HTTPException(status_code=400, detail="任务尚未完成")
 
-    file_path = tasks[task_id]["result"]["file_path"]
     filename = tasks[task_id]["result"]["filename"]
-    if not os.path.exists(file_path):
+    download_token = tasks[task_id]["result"].get("download_token")
+    if not download_token:
         raise HTTPException(status_code=404, detail="结果文件不存在")
 
-    return FileResponse(
-        path=file_path,
-        filename=filename,
+    file_bytes = base64.b64decode(download_token)
+
+    return StreamingResponse(
+        io.BytesIO(file_bytes),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 

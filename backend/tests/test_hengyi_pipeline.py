@@ -1,0 +1,316 @@
+import pandas as pd
+import pytest
+
+from services.hengyi_comparison import (
+    HengyiComparisonError,
+    compare_hengyi_data,
+    parse_hengyi_factory_data,
+    parse_hengyi_jiuding_data,
+)
+
+
+def test_parse_hengyi_factory_data_maps_code_to_short_name_and_keeps_order_as_string():
+    source_df = pd.DataFrame(
+        [
+            {
+                "过账日期": "2026-04-08 00:00:00",
+                "送达方": "杭州银瑞化纤有限公司",
+                "交货单": "0088395730",
+                "车牌号": "浙A12345",
+                "托盘数": "42",
+                "工厂": "3100",
+                "物料描述": "POY 切片",
+            }
+        ]
+    )
+
+    result = parse_hengyi_factory_data(source_df, source_filename="高新_SAP.xlsx")
+
+    assert result.iloc[0]["日期"] == "2026/4/8"
+    assert result.iloc[0]["订单号"] == "0088395730"
+    assert result.iloc[0]["工厂"] == "恒逸高新"
+    assert result.iloc[0]["工厂侧型号"] == "POY"
+    assert result.iloc[0]["工厂侧送达方"] == "杭州银瑞化纤有限公司"
+    assert result.iloc[0]["工厂侧车牌号"] == "浙A12345"
+    assert result.iloc[0]["工厂侧托盘数"] == 42
+
+
+def test_parse_hengyi_factory_data_falls_back_to_filename_alias_when_code_is_unknown():
+    source_df = pd.DataFrame(
+        [
+            {
+                "过账日期": "2026-04-08 00:00:00",
+                "送达方": "杭州银瑞化纤有限公司",
+                "交货单": "0088395730",
+                "车牌号": "浙A12345",
+                "托盘数": "42",
+                "工厂": "1600",
+                "物料描述": "FDY 切片",
+            }
+        ]
+    )
+
+    result = parse_hengyi_factory_data(source_df, source_filename="恒逸高新_SAP.xlsx")
+
+    assert result.iloc[0]["工厂"] == "恒逸高新"
+    assert result.iloc[0]["工厂侧型号"] == "FDY"
+
+
+def test_parse_hengyi_jiuding_data_filters_to_selected_factories():
+    source_df = pd.DataFrame(
+        [
+            {
+                "订单日期": "2026-04-08 21:36:04.0",
+                "出库单号": "0088395730",
+                "会员名称": "杭州银瑞化纤有限公司",
+                "客户名称": "浙江恒逸高新材料有限公司",
+                "产品类型": "FDY",
+                "实际出库数量": "42",
+            },
+            {
+                "订单日期": "2026-04-08 21:36:04.0",
+                "出库单号": "0088395999",
+                "会员名称": "其他客户",
+                "客户名称": "浙江双兔新材料有限公司",
+                "产品类型": "FDY",
+                "实际出库数量": "10",
+            },
+        ]
+    )
+
+    result = parse_hengyi_jiuding_data(source_df, selected_factory_short_names={"恒逸高新"})
+
+    assert result["订单号"].tolist() == ["0088395730"]
+    assert result.iloc[0]["工厂"] == "恒逸高新"
+    assert result.iloc[0]["久鼎侧实际出库数量"] == 42
+
+
+def test_compare_hengyi_data_stops_when_dates_do_not_match():
+    factory_df = pd.DataFrame(
+        [
+            {
+                "日期": "2026/4/9",
+                "订单号": "0088395730",
+                "工厂": "恒逸高新",
+                "工厂侧送达方": "杭州银瑞化纤有限公司",
+                "工厂侧车牌号": "浙A12345",
+                "工厂侧托盘数": 42,
+            }
+        ]
+    )
+    jiuding_df = pd.DataFrame(
+        [
+            {
+                "日期": "2026/4/8",
+                "订单号": "0088395730",
+                "工厂": "恒逸高新",
+                "久鼎侧会员名称": "杭州银瑞化纤有限公司",
+                "久鼎侧产品类型": "FDY",
+                "久鼎侧实际出库数量": 42,
+            }
+        ]
+    )
+
+    with pytest.raises(HengyiComparisonError, match="日期"):
+        compare_hengyi_data(factory_df, jiuding_df)
+
+
+def test_compare_hengyi_data_suppresses_split_delivery_in_second_pass():
+    factory_df = pd.DataFrame(
+        [
+            {
+                "日期": "2026/4/8",
+                "订单号": "A",
+                "工厂": "恒逸高新",
+                "工厂侧送达方": "客户甲",
+                "工厂侧车牌号": "浙A12345",
+                "工厂侧托盘数": 20,
+            },
+            {
+                "日期": "2026/4/8",
+                "订单号": "B",
+                "工厂": "恒逸高新",
+                "工厂侧送达方": "客户甲",
+                "工厂侧车牌号": "浙A12345",
+                "工厂侧托盘数": 22,
+            },
+        ]
+    )
+    jiuding_df = pd.DataFrame(
+        [
+            {
+                "日期": "2026/4/8",
+                "订单号": "A",
+                "工厂": "恒逸高新",
+                "久鼎侧会员名称": "客户甲",
+                "久鼎侧产品类型": "FDY",
+                "久鼎侧实际出库数量": 42,
+            }
+        ]
+    )
+
+    result = compare_hengyi_data(factory_df, jiuding_df)
+
+    assert result.empty
+
+
+def test_compare_hengyi_data_keeps_factory_only_missing_order_as_exception():
+    factory_df = pd.DataFrame(
+        [
+            {
+                "日期": "2026/4/8",
+                "订单号": "B",
+                "工厂": "恒逸高新",
+                "工厂侧送达方": "客户甲",
+                "工厂侧车牌号": "浙A12345",
+                "工厂侧托盘数": 22,
+            }
+        ]
+    )
+    jiuding_df = pd.DataFrame(
+        columns=["日期", "订单号", "工厂", "久鼎侧会员名称", "久鼎侧产品类型", "久鼎侧实际出库数量"]
+    )
+
+    result = compare_hengyi_data(factory_df, jiuding_df)
+
+    assert len(result) == 1
+    assert result.iloc[0]["交货单(工厂)"] == "B"
+    assert result.iloc[0]["出库单号(久鼎)"] is None
+    assert result.iloc[0]["差量"] == 22
+
+
+def test_compare_hengyi_data_outputs_labeled_factory_and_jiuding_fields():
+    factory_df = pd.DataFrame(
+        [
+            {
+                "日期": "2026/4/8",
+                "订单号": "0088395730",
+                "工厂": "恒逸高新",
+                "工厂编码": "3100",
+                "工厂侧送达方": "杭州银瑞化纤有限公司",
+                "工厂侧型号": "FDY",
+                "工厂侧车牌号": "浙A12345",
+                "工厂侧托盘数": 36,
+            }
+        ]
+    )
+    jiuding_df = pd.DataFrame(
+        [
+            {
+                "日期": "2026/4/8",
+                "订单号": "0088395730",
+                "工厂": "恒逸高新",
+                "久鼎侧客户名称": "浙江恒逸高新材料有限公司",
+                "久鼎侧会员名称": "杭州银瑞化纤有限公司",
+                "久鼎侧产品类型": "FDY",
+                "久鼎侧实际出库数量": 42,
+            },
+            {
+                "日期": "2026/4/8",
+                "订单号": "0088396000",
+                "工厂": "恒逸高新",
+                "久鼎侧客户名称": "浙江恒逸高新材料有限公司",
+                "久鼎侧会员名称": "海宁锡铭经编有限公司",
+                "久鼎侧产品类型": "FDY",
+                "久鼎侧实际出库数量": 10,
+            },
+        ]
+    )
+
+    result = compare_hengyi_data(factory_df, jiuding_df)
+
+    assert list(result.columns) == [
+        "异常类型",
+        "过账日期(工厂)",
+        "交货单(工厂)",
+        "工厂(工厂)",
+        "送达方(工厂)",
+        "车牌号(工厂)",
+        "型号(工厂)",
+        "托盘数(工厂)",
+        "订单日期(久鼎)",
+        "出库单号(久鼎)",
+        "客户名称(久鼎)",
+        "会员名称(久鼎)",
+        "产品类型(久鼎)",
+        "实际出库数量(久鼎)",
+        "差量",
+    ]
+    assert result.iloc[0]["异常类型"] == "数量差异待核实"
+    assert result.iloc[1]["异常类型"] == "久鼎侧待补录"
+    assert result["交货单(工厂)"].tolist() == ["0088395730", None]
+    assert result["出库单号(久鼎)"].tolist() == ["0088395730", "0088396000"]
+    assert result.iloc[0]["工厂(工厂)"] == "恒逸高新(3100)"
+    assert result.iloc[0]["托盘数(工厂)"] == 36
+    assert result.iloc[0]["实际出库数量(久鼎)"] == 42
+    assert result.iloc[0]["差量"] == -6
+    assert result.iloc[1]["工厂(工厂)"] is None
+    assert result.iloc[1]["会员名称(久鼎)"] == "海宁锡铭经编有限公司"
+
+
+def test_compare_hengyi_data_expands_factory_rows_and_keeps_jiuding_once_per_order():
+    factory_df = pd.DataFrame(
+        [
+            {
+                "日期": "2026/4/8",
+                "订单号": "B200",
+                "工厂": "恒逸高新",
+                "工厂编码": "3100",
+                "工厂侧送达方": "杭州银瑞化纤有限公司",
+                "工厂侧型号": "FDY",
+                "工厂侧车牌号": "浙A12345",
+                "工厂侧托盘数": 10,
+            },
+            {
+                "日期": "2026/4/8",
+                "订单号": "A100",
+                "工厂": "恒逸高新",
+                "工厂编码": "3100",
+                "工厂侧送达方": "杭州银瑞化纤有限公司",
+                "工厂侧型号": "FDY",
+                "工厂侧车牌号": "浙A12345",
+                "工厂侧托盘数": 20,
+            },
+            {
+                "日期": "2026/4/8",
+                "订单号": "A100",
+                "工厂": "恒逸高新",
+                "工厂编码": "3100",
+                "工厂侧送达方": "杭州银瑞化纤有限公司",
+                "工厂侧型号": "FDY",
+                "工厂侧车牌号": "浙A12345",
+                "工厂侧托盘数": 16,
+            },
+        ]
+    )
+    jiuding_df = pd.DataFrame(
+        [
+            {
+                "日期": "2026/4/8",
+                "订单号": "A100",
+                "工厂": "恒逸高新",
+                "久鼎侧客户名称": "浙江恒逸高新材料有限公司",
+                "久鼎侧会员名称": "杭州银瑞化纤有限公司",
+                "久鼎侧产品类型": "FDY",
+                "久鼎侧实际出库数量": 42,
+            },
+            {
+                "日期": "2026/4/8",
+                "订单号": "B200",
+                "工厂": "恒逸高新",
+                "久鼎侧客户名称": "浙江恒逸高新材料有限公司",
+                "久鼎侧会员名称": "杭州银瑞化纤有限公司",
+                "久鼎侧产品类型": "FDY",
+                "久鼎侧实际出库数量": 9,
+            },
+        ]
+    )
+
+    result = compare_hengyi_data(factory_df, jiuding_df)
+
+    assert result["异常类型"].tolist() == ["数量差异待核实", "数量差异待核实", "数量差异待核实"]
+    assert result["交货单(工厂)"].tolist() == ["A100", "A100", "B200"]
+    assert result["出库单号(久鼎)"].tolist() == ["A100", None, "B200"]
+    assert result["托盘数(工厂)"].tolist() == [20, 16, 10]
+    assert result["实际出库数量(久鼎)"].tolist() == [42, None, 9]
+    assert result["差量"].tolist() == [-6, None, 1]

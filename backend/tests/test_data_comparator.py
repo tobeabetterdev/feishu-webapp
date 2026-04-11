@@ -31,7 +31,7 @@ def test_compare_maps_factory_name_to_short_name_from_current_group():
 
     result = DataComparator(factory_df, jiuding_df, "xinfengming").compare()
 
-    assert result.iloc[0]["工厂"] == "江苏"
+    assert result.iloc[0]["工厂"] == "新拓"
 
 
 def test_compare_does_not_fill_factory_from_unmatched_jiuding_company():

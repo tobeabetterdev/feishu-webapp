@@ -1,13 +1,4 @@
-export interface ComparisonResult {
-  '日期': string
-  '单号': string
-  '工厂': string | null
-  '型号': string
-  '公司': string
-  '客户出库数': number | null
-  '久鼎出库数': number | null
-  '待处理数量': number | null
-}
+export type ComparisonResult = Record<string, string | number | null>
 
 export interface TaskStatus {
   task_id: string
@@ -18,7 +9,7 @@ export interface TaskStatus {
 
 export interface TaskResult {
   data: ComparisonResult[]
-  file_path: string
   filename: string
   total_count: number
+  download_token?: string
 }

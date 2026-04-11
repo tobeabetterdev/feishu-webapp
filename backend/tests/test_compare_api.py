@@ -1,4 +1,6 @@
 import asyncio
+import base64
+import io
 import math
 from types import SimpleNamespace
 
@@ -43,9 +45,9 @@ def test_compare_returns_task_id_immediately_and_runs_in_background(monkeypatch)
         observed["finished"] = True
         return {
             "data": [],
-            "file_path": "outputs/mock.xlsx",
             "filename": "mock.xlsx",
             "total_count": 0,
+            "download_token": "bW9jaw==",
             "artifacts": {},
         }
 
@@ -112,35 +114,28 @@ def test_get_task_result_replaces_nan_with_null():
             "data": [
                 {
                     "日期": "2026/4/9",
-                    "单号": "A-001",
+                    "订单号": "A-001",
                     "工厂": None,
                     "型号": None,
                     "公司": None,
-                    "客户出库数": 1,
-                    "久鼎出库数": 2,
-                    "待处理数量": math.nan,
+                    "工厂量": 1,
+                    "久鼎量": 2,
+                    "差量": math.nan,
                 }
             ],
-            "file_path": "outputs/mock.xlsx",
             "filename": "mock.xlsx",
             "total_count": 1,
+            "download_token": "bW9jaw==",
         },
     }
 
     response = client.get(f"/api/compare/{task_id}/result")
 
     assert response.status_code == 200
-    assert response.json()["data"][0]["待处理数量"] is None
+    assert response.json()["data"][0]["差量"] is None
 
 
-def test_run_comparison_sync_omits_filename_date_when_missing(monkeypatch, tmp_path):
-    class StubPlan:
-        def to_column_mapping(self):
-            return {"order_no": "单号", "company": "公司", "quantity": "数量"}
-
-        def model_dump(self):
-            return {"fields": [{"name": "order_no"}, {"name": "company"}, {"name": "quantity"}]}
-
+def test_run_comparison_sync_uses_xinfengming_service_and_omits_missing_date(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     compare_api.tasks["missing-date-task"] = {
         "task_id": "missing-date-task",
@@ -151,53 +146,107 @@ def test_run_comparison_sync_omits_filename_date_when_missing(monkeypatch, tmp_p
     }
     monkeypatch.setattr(compare_api, "load_llm_settings", lambda: SimpleNamespace())
     monkeypatch.setattr(compare_api, "build_task_llm_settings", lambda settings, **kwargs: settings)
-    monkeypatch.setattr(
-        compare_api,
-        "build_jiuding_reference_samples",
-        lambda file_contents: [
-            {
-                "出库单号": "A-001",
-                "会员名称": "浙江恒逸高新材料有限公司",
-                "实际出库数量": "1",
-                "产品类型": "POY",
-            }
-        ],
-    )
-    monkeypatch.setattr(
-        compare_api,
-        "convert_excel_to_markdown",
-        lambda content, filename: {"markdown": "mock", "preview": "mock"},
-    )
+    monkeypatch.setattr(compare_api, "build_jiuding_reference_samples", lambda file_contents: [{"订单号": "A-001"}])
+
     observed = {}
 
-    def fake_build_extraction_plan(**kwargs):
-        observed.setdefault("calls", []).append(kwargs)
-        return StubPlan()
+    def fake_compare_xinfengming_data(**kwargs):
+        observed["kwargs"] = kwargs
+        return {
+            "result_df": pd.DataFrame([{"日期": None, "订单号": "A-001", "工厂": "江苏", "差量": 1}]),
+            "artifacts": {
+                "factory_files": [
+                    {
+                        "filename": "factory.xlsx",
+                        "preview": "mock",
+                        "plan": {"fields": [{"name": "order_no"}, {"name": "company"}]},
+                    }
+                ],
+                "jiuding_files": [],
+            },
+        }
 
-    monkeypatch.setattr(compare_api, "build_extraction_plan", fake_build_extraction_plan)
-    monkeypatch.setattr(compare_api, "normalize_records", lambda df, mapping: df)
-    monkeypatch.setattr(
-        pd,
-        "read_excel",
-        lambda *args, **kwargs: pd.DataFrame([{"单号": "A-001", "公司": "浙江恒逸高新材料有限公司", "数量": 1}]),
-    )
-    monkeypatch.setattr(
-        compare_api.DataComparator,
-        "compare",
-        lambda self: pd.DataFrame([{"日期": None, "单号": "A-001", "工厂": "恒逸高新", "待处理数量": 1}]),
-    )
+    monkeypatch.setattr(compare_api, "compare_xinfengming_data", fake_compare_xinfengming_data)
 
     result = compare_api._run_comparison_sync(
         task_id="missing-date-task",
         factory_files=[{"filename": "factory.xlsx", "content": b"factory"}],
         jiuding_files=[{"filename": "jiuding.xlsx", "content": b"jiuding"}],
-        factory_type="hengyi",
+        factory_type="xinfengming",
         llm_overrides={},
     )
 
     assert result["filename"].startswith("订单核对_")
-    assert "2026-" not in result["filename"]
     assert result["filename"].count("_") == 1
-    assert observed["calls"][0]["role"] == "factory"
-    assert observed["calls"][0]["jiuding_reference_rows"][0]["会员名称"] == "浙江恒逸高新材料有限公司"
+    assert observed["kwargs"]["factory_type"] == "xinfengming"
+    assert observed["kwargs"]["jiuding_reference_rows"][0]["订单号"] == "A-001"
     assert result["artifacts"]["factory_files"][0]["plan"]["fields"][1]["name"] == "company"
+
+
+def test_save_result_writes_hengyi_multi_sheet_workbook(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    result_df = pd.DataFrame(
+        [
+            {
+                "异常类型": "工厂侧待补录",
+                "过账日期(工厂)": "2026/4/8",
+                "交货单(工厂)": "F001",
+                "工厂(工厂)": "恒逸高新(3100)",
+                "送达方(工厂)": "杭州银瑞化纤有限公司",
+                "车牌号(工厂)": "浙A12345",
+                "型号(工厂)": "FDY",
+                "托盘数(工厂)": 12,
+                "订单日期(久鼎)": None,
+                "出库单号(久鼎)": None,
+                "客户名称(久鼎)": None,
+                "会员名称(久鼎)": None,
+                "产品类型(久鼎)": None,
+                "实际出库数量(久鼎)": None,
+                "差量": 12,
+            },
+            {
+                "异常类型": "久鼎侧待补录",
+                "过账日期(工厂)": None,
+                "交货单(工厂)": None,
+                "工厂(工厂)": None,
+                "送达方(工厂)": None,
+                "车牌号(工厂)": None,
+                "型号(工厂)": None,
+                "托盘数(工厂)": None,
+                "订单日期(久鼎)": "2026/4/8",
+                "出库单号(久鼎)": "J001",
+                "客户名称(久鼎)": "浙江恒逸高新材料有限公司",
+                "会员名称(久鼎)": "杭州银瑞化纤有限公司",
+                "产品类型(久鼎)": "FDY",
+                "实际出库数量(久鼎)": 9,
+                "差量": -9,
+            },
+            {
+                "异常类型": "数量差异待核实",
+                "过账日期(工厂)": "2026/4/8",
+                "交货单(工厂)": "M001",
+                "工厂(工厂)": "恒逸高新(3100)",
+                "送达方(工厂)": "杭州银瑞化纤有限公司",
+                "车牌号(工厂)": "浙A99999",
+                "型号(工厂)": "FDY",
+                "托盘数(工厂)": 10,
+                "订单日期(久鼎)": "2026/4/8",
+                "出库单号(久鼎)": "M001",
+                "客户名称(久鼎)": "浙江恒逸高新材料有限公司",
+                "会员名称(久鼎)": "杭州银瑞化纤有限公司",
+                "产品类型(久鼎)": "FDY",
+                "实际出库数量(久鼎)": 15,
+                "差量": -5,
+            },
+        ]
+    )
+
+    saved = compare_api._save_result(result_df=result_df, artifacts={"factory_type": "hengyi"})
+
+    workbook = pd.ExcelFile(io.BytesIO(base64.b64decode(saved["download_token"])))
+
+    assert workbook.sheet_names == ["异常汇总", "工厂侧待补录", "久鼎侧待补录", "数量差异待核实"]
+
+    summary_df = pd.read_excel(io.BytesIO(base64.b64decode(saved["download_token"])), sheet_name="异常汇总")
+    assert "异常类型" in summary_df.columns
+    assert summary_df["异常类型"].tolist() == ["工厂侧待补录", "久鼎侧待补录", "数量差异待核实"]
