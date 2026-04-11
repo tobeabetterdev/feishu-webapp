@@ -293,10 +293,10 @@ function HengyiResultsView({ rows }: { rows: RawRow[] }) {
             className={`min-w-[188px] flex-1 rounded-[22px] border px-4 py-4 text-left transition ${
               activeType === stat.type
                 ? stat.activeClassName
-                : 'border-slate-200 bg-white text-slate-800 hover:border-slate-300 hover:bg-slate-50'
+                : 'border-slate-200 bg-slate-100 text-slate-900 hover:border-slate-300 hover:bg-slate-50'
             }`}
           >
-            <p className={`text-sm font-semibold tracking-[0.12em] ${activeType === stat.type ? 'text-white/80' : 'text-slate-400'}`}>
+            <p className={`text-sm font-semibold tracking-[0.12em] ${activeType === stat.type ? 'text-white/80' : 'text-slate-500'}`}>
               {stat.label}
             </p>
             <p className="mt-3 text-3xl font-semibold tracking-tight">{stat.value}</p>

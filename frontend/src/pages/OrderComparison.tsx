@@ -15,9 +15,9 @@ import ResultsTable from '../components/ResultsTable'
 import { ComparisonResult } from '../types'
 import {
   createComparison,
+  downloadTaskResult,
   getTaskStatus,
   getTaskResult,
-  getDownloadUrl,
 } from '../services/api'
 
 type FactoryType = 'hengyi' | 'xinfengming'
@@ -213,9 +213,15 @@ export default function OrderComparison() {
     }
   }
 
-  const handleDownload = () => {
+  const handleDownload = async () => {
     if (!taskId) return
-    window.open(getDownloadUrl(taskId), '_blank')
+
+    try {
+      await downloadTaskResult(taskId)
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : '下载结果失败'
+      alert(`下载结果失败: ${errorMessage}`)
+    }
   }
 
   const steps = (Object.keys(STAGE_META) as StageKey[]).map((key) => ({

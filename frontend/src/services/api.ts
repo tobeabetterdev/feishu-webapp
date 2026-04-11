@@ -14,9 +14,9 @@ export interface TaskStatus {
 
 export interface TaskResult {
   data: any[]
-  file_path: string
   filename: string
   total_count: number
+  download_token?: string
 }
 
 export async function createComparison(
@@ -60,6 +60,40 @@ export async function getTaskResult(taskId: string): Promise<TaskResult> {
   return response.json()
 }
 
-export function getDownloadUrl(taskId: string): string {
-  return `${API_BASE_URL}/compare/${taskId}/download`
+function resolveDownloadFilename(contentDisposition: string | null, fallbackFilename: string): string {
+  if (!contentDisposition) {
+    return fallbackFilename
+  }
+
+  const utf8Match = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i)
+  if (utf8Match?.[1]) {
+    return decodeURIComponent(utf8Match[1])
+  }
+
+  const filenameMatch = contentDisposition.match(/filename="?([^"]+)"?/i)
+  if (filenameMatch?.[1]) {
+    return filenameMatch[1]
+  }
+
+  return fallbackFilename
+}
+
+export async function downloadTaskResult(taskId: string, fallbackFilename = '订单核对结果.xlsx'): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/compare/${taskId}/download`)
+  if (!response.ok) {
+    const errorText = await response.text()
+    throw new Error(`下载结果失败: ${errorText}`)
+  }
+
+  const blob = await response.blob()
+  const downloadUrl = URL.createObjectURL(blob)
+  const filename = resolveDownloadFilename(response.headers.get('content-disposition'), fallbackFilename)
+  const anchor = document.createElement('a')
+
+  anchor.href = downloadUrl
+  anchor.download = filename
+  document.body.appendChild(anchor)
+  anchor.click()
+  document.body.removeChild(anchor)
+  URL.revokeObjectURL(downloadUrl)
 }
