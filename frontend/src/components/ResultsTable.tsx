@@ -360,7 +360,7 @@ function HengyiResultsView({ rows }: { rows: RawRow[] }) {
 
                   {expanded ? (
                     <div className="space-y-4 px-4 py-4">
-                      <div className="rounded-[20px] border border-slate-200 bg-[linear-gradient(135deg,rgba(240,252,252,0.88),rgba(255,248,235,0.72))] p-4">
+                      <div className="hidden rounded-[20px] border border-slate-200 bg-[linear-gradient(135deg,rgba(240,252,252,0.88),rgba(255,248,235,0.72))] p-4">
                         <p className="text-sm font-semibold tracking-[0.12em] text-slate-400">久鼎摘要</p>
                         <div className="mt-3 flex flex-wrap gap-x-6 gap-y-3 text-base text-slate-700">
                           <div className="flex items-center gap-2 whitespace-nowrap">
@@ -383,6 +383,49 @@ function HengyiResultsView({ rows }: { rows: RawRow[] }) {
                             <span className="text-slate-400">订单日期</span>
                             <span>{toText(group.jiuding?.['订单日期(久鼎)'])}</span>
                           </div>
+                        </div>
+                      </div>
+
+                      <div className="overflow-hidden rounded-[20px] border border-slate-200 bg-[linear-gradient(135deg,rgba(240,252,252,0.88),rgba(255,248,235,0.72))]">
+                        <div className="border-b border-slate-200/80 px-4 py-3">
+                          <p className="text-sm font-semibold tracking-[0.12em] text-slate-400">久鼎摘要</p>
+                        </div>
+                        <div className="overflow-x-auto">
+                          <table className="min-w-full text-left">
+                            <thead>
+                              <tr className="border-b border-slate-200/80">
+                                {['出库单号', '客户名称', '会员名称', '久鼎数量', '订单日期'].map((column) => (
+                                  <th
+                                    key={column}
+                                    className={`px-4 py-3 text-sm font-semibold tracking-[0.06em] text-slate-400 whitespace-nowrap ${
+                                      column === '久鼎数量' ? 'text-right' : ''
+                                    }`}
+                                  >
+                                    {column}
+                                  </th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              <tr className="bg-white/55">
+                                <td className="px-4 py-4 whitespace-nowrap">
+                                  {renderCompactCell('出库单号', group.jiuding?.['出库单号(久鼎)'])}
+                                </td>
+                                <td className="px-4 py-4 whitespace-nowrap text-base text-slate-700">
+                                  {toText(group.jiuding?.['客户名称(久鼎)'])}
+                                </td>
+                                <td className="px-4 py-4 whitespace-nowrap text-base text-slate-700">
+                                  {toText(group.jiuding?.['会员名称(久鼎)'])}
+                                </td>
+                                <td className="px-4 py-4 whitespace-nowrap text-right text-base font-semibold text-slate-900">
+                                  {group.jiudingQty}
+                                </td>
+                                <td className="px-4 py-4 whitespace-nowrap text-base text-slate-700">
+                                  {toText(group.jiuding?.['订单日期(久鼎)'])}
+                                </td>
+                              </tr>
+                            </tbody>
+                          </table>
                         </div>
                       </div>
 
