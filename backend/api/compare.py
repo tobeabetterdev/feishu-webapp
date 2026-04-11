@@ -19,17 +19,13 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
-from config.settings import build_task_llm_settings, load_llm_settings
-from services.document_converter import convert_excel_to_markdown
-from services.field_mapping_service import build_extraction_plan, build_jiuding_reference_samples
-from services.hengyi_comparison import (
+from services.hengyi_order_comparison import (
     HengyiComparisonError,
     compare_hengyi_data,
     parse_hengyi_factory_data,
     parse_hengyi_jiuding_data,
 )
-from services.normalized_extractor import attach_record_context, normalize_records
-from services.xinfengming_comparison import compare_xinfengming_data
+from services.xinfengming_order_comparison import compare_xinfengming_data
 
 router = APIRouter()
 tasks: Dict[str, Dict[str, Any]] = {}
@@ -78,6 +74,48 @@ HENGYI_HEADER_GROUPS = {
     "久鼎": ["久鼎出库单号", "会员名称", "久鼎产品类型", "久鼎客户名称", "久鼎子公司名称", "久鼎出库数量", "久鼎订单日期"],
 }
 
+XINFENGMING_SUMMARY_COLUMNS = [
+    "日期",
+    "单号",
+    "工厂",
+    "型号",
+    "公司",
+    "客户出库数",
+    "久鼎出库数",
+    "待处理数量",
+]
+
+XINFENGMING_DETAIL_COLUMNS = [
+    "异常类型",
+    "交货单号",
+    "交货创建日期",
+    "销售组织描述",
+    "客户名称",
+    "汇总单号",
+    "工厂简称",
+    "业务员",
+    "车牌号",
+    "物料组描述",
+    "件数",
+    "交货单类型",
+    "包装批号",
+    "出库单号",
+    "订单日期",
+    "久鼎客户名称",
+    "会员名称",
+    "产品类型",
+    "实际出库数量",
+    "子公司名称",
+    "订单状态",
+    "送货方式",
+    "差异数量",
+]
+
+XINFENGMING_HEADER_GROUPS = {
+    "工厂": ["交货单号", "交货创建日期", "销售组织描述", "客户名称", "汇总单号", "工厂简称", "业务员", "车牌号", "物料组描述", "件数", "交货单类型", "包装批号"],
+    "久鼎": ["出库单号", "订单日期", "久鼎客户名称", "会员名称", "产品类型", "实际出库数量", "子公司名称", "订单状态", "送货方式", "差异数量"],
+}
+
 
 class TaskStatus(BaseModel):
     task_id: str
@@ -124,7 +162,7 @@ def _update_task(
     )
 
 
-def _build_result_filename(result_df: pd.DataFrame) -> str:
+def _build_result_filename(result_df: pd.DataFrame, *, factory_type: str | None = None) -> str:
     date_for_name = ""
     for column_name in ("日期", "过账日期(工厂)", "订单日期(久鼎)"):
         if not result_df.empty and column_name in result_df.columns:
@@ -133,7 +171,11 @@ def _build_result_filename(result_df: pd.DataFrame) -> str:
                 date_for_name = str(first_date).strip().replace("/", "-")
                 break
 
-    filename_parts = ["订单核对"]
+    factory_prefix_map = {
+        "hengyi": "恒逸订单核对",
+        "xinfengming": "新凤鸣订单核对",
+    }
+    filename_parts = [factory_prefix_map.get(factory_type or "", "订单核对")]
     if date_for_name:
         filename_parts.append(date_for_name)
     filename_parts.append(str(uuid.uuid4())[:8])
@@ -232,10 +274,97 @@ def _build_hengyi_result_bytes(result_df: pd.DataFrame) -> bytes:
     return buffer.getvalue()
 
 
-def _build_xinfengming_result_bytes(result_df: pd.DataFrame) -> bytes:
+def _resolve_xinfengming_anomaly_type(row: pd.Series) -> str:
+    factory_qty = int(row.get("客户出库数") or 0)
+    jiuding_qty = int(row.get("久鼎出库数") or 0)
+    if factory_qty > 0 and jiuding_qty > 0:
+        return "数量差异"
+    if factory_qty > 0:
+        return "久鼎缺单"
+    return "工厂缺单"
+
+
+def _build_xinfengming_detail_sheet(result_df: pd.DataFrame, artifacts: Dict[str, Any]) -> pd.DataFrame:
+    factory_records = pd.DataFrame(artifacts.get("factory_records", []))
+    jiuding_records = pd.DataFrame(artifacts.get("jiuding_records", []))
+
+    detail_rows: list[dict[str, Any]] = []
+    for _, summary_row in result_df.iterrows():
+        order_no = summary_row.get("单号")
+        anomaly_type = _resolve_xinfengming_anomaly_type(summary_row)
+
+        factory_matches = (
+            factory_records[factory_records["单号"] == order_no].to_dict(orient="records")
+            if not factory_records.empty and "单号" in factory_records.columns
+            else []
+        )
+        jiuding_matches = (
+            jiuding_records[jiuding_records["单号"] == order_no].to_dict(orient="records")
+            if not jiuding_records.empty and "单号" in jiuding_records.columns
+            else []
+        )
+        max_rows = max(len(factory_matches), len(jiuding_matches), 1)
+
+        for index in range(max_rows):
+            factory_detail = factory_matches[index] if index < len(factory_matches) else {}
+            jiuding_detail = jiuding_matches[index] if index < len(jiuding_matches) else {}
+            detail_rows.append(
+                {
+                    "异常类型": anomaly_type,
+                    "交货单号": factory_detail.get("交货单号"),
+                    "交货创建日期": factory_detail.get("交货创建日期"),
+                    "销售组织描述": factory_detail.get("销售组织描述"),
+                    "客户名称": factory_detail.get("客户名称"),
+                    "汇总单号": order_no,
+                    "工厂简称": summary_row.get("工厂"),
+                    "业务员": factory_detail.get("业务员"),
+                    "车牌号": factory_detail.get("车牌号"),
+                    "物料组描述": factory_detail.get("物料组描述"),
+                    "件数": factory_detail.get("件数"),
+                    "交货单类型": factory_detail.get("交货单类型"),
+                    "包装批号": factory_detail.get("包装批号"),
+                    "出库单号": jiuding_detail.get("出库单号"),
+                    "订单日期": jiuding_detail.get("订单日期"),
+                    "久鼎客户名称": jiuding_detail.get("客户名称"),
+                    "会员名称": jiuding_detail.get("会员名称"),
+                    "产品类型": jiuding_detail.get("产品类型"),
+                    "实际出库数量": jiuding_detail.get("实际出库数量"),
+                    "子公司名称": jiuding_detail.get("子公司名称"),
+                    "订单状态": jiuding_detail.get("订单状态"),
+                    "送货方式": jiuding_detail.get("送货方式"),
+                    "差异数量": summary_row.get("待处理数量"),
+                }
+            )
+
+    return pd.DataFrame(detail_rows, columns=XINFENGMING_DETAIL_COLUMNS)
+
+
+def _write_xinfengming_detail_sheet(writer: pd.ExcelWriter, detail_df: pd.DataFrame) -> None:
+    export_df = detail_df.copy().astype(object)
+    export_df = export_df.where(pd.notna(export_df), None)
+    export_df.to_excel(writer, sheet_name="异常详情", index=False, startrow=1)
+
+    worksheet = writer.book["异常详情"]
+    worksheet.freeze_panes = "A3"
+
+    column_lookup = {column_name: index + 1 for index, column_name in enumerate(XINFENGMING_DETAIL_COLUMNS)}
+    worksheet.cell(row=1, column=column_lookup["异常类型"], value="异常")
+    for group_name, columns in XINFENGMING_HEADER_GROUPS.items():
+        start_column = column_lookup[columns[0]]
+        end_column = column_lookup[columns[-1]]
+        worksheet.cell(row=1, column=start_column, value=group_name)
+        if start_column != end_column:
+            worksheet.merge_cells(start_row=1, start_column=start_column, end_row=1, end_column=end_column)
+
+
+def _build_xinfengming_result_bytes(result_df: pd.DataFrame, artifacts: Dict[str, Any]) -> bytes:
     buffer = io.BytesIO()
+    summary_df = result_df.reindex(columns=XINFENGMING_SUMMARY_COLUMNS)
+    detail_df = _build_xinfengming_detail_sheet(result_df, artifacts)
+
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-        result_df.to_excel(writer, index=False)
+        _write_sheet(writer, "异常汇总", summary_df)
+        _write_xinfengming_detail_sheet(writer, detail_df)
     return buffer.getvalue()
 
 
@@ -250,11 +379,11 @@ def _save_result(
     result_df: pd.DataFrame,
     artifacts: Dict[str, Any],
 ) -> Dict[str, Any]:
-    filename = _build_result_filename(result_df)
+    filename = _build_result_filename(result_df, factory_type=artifacts.get("factory_type"))
     if _is_hengyi_result(result_df, artifacts):
         download_bytes = _build_hengyi_result_bytes(result_df)
     else:
-        download_bytes = _build_xinfengming_result_bytes(result_df)
+        download_bytes = _build_xinfengming_result_bytes(result_df, artifacts)
 
     download_token = base64.b64encode(download_bytes).decode("ascii")
 
@@ -264,99 +393,6 @@ def _save_result(
         "total_count": len(result_df),
         "download_token": download_token,
         "artifacts": artifacts,
-    }
-
-
-def _normalize_optional_text(value: object) -> str | None:
-    if value is None or pd.isna(value):
-        return None
-    text = str(value).strip()
-    return text or None
-
-
-def _attach_jiuding_filter_company(
-    normalized_df: pd.DataFrame,
-    *,
-    source_df: pd.DataFrame,
-    plan_mapping: Dict[str, str],
-) -> pd.DataFrame:
-    normalized_order_column = "订单号" if "订单号" in normalized_df.columns else "单号" if "单号" in normalized_df.columns else None
-    if normalized_order_column is None:
-        return normalized_df
-
-    order_column = plan_mapping.get("order_no")
-    if not order_column or order_column not in source_df.columns:
-        return normalized_df
-
-    customer_column = None
-    for column in source_df.columns:
-        if "客户名称" in str(column).strip():
-            customer_column = str(column).strip()
-            break
-    if customer_column is None:
-        return normalized_df
-
-    filter_df = pd.DataFrame(
-        {
-            normalized_order_column: source_df[order_column].map(_normalize_optional_text),
-            "筛选公司": source_df[customer_column].map(_normalize_optional_text),
-        }
-    )
-    filter_df = filter_df.dropna(subset=[normalized_order_column, "筛选公司"])
-    if filter_df.empty:
-        return normalized_df
-
-    filter_df = filter_df.groupby(normalized_order_column, as_index=False).agg({"筛选公司": "first"})
-    return normalized_df.merge(filter_df, on=normalized_order_column, how="left")
-
-
-def _process_single_excel(
-    *,
-    content: bytes,
-    filename: str,
-    role: str,
-    factory_type: str,
-    llm_settings,
-    jiuding_reference_rows: List[Dict[str, str]] | None = None,
-) -> Dict[str, Any]:
-    document = convert_excel_to_markdown(content, filename)
-    plan = build_extraction_plan(
-        file_content=content,
-        filename=filename,
-        role=role,
-        factory_type=factory_type,
-        markdown=document["markdown"],
-        preview=document["preview"],
-        llm_settings=llm_settings,
-        jiuding_reference_rows=jiuding_reference_rows,
-    )
-
-    source_df = pd.read_excel(io.BytesIO(content), dtype=str)
-    source_df.columns = [str(column).strip() for column in source_df.columns]
-    plan_mapping = plan.to_column_mapping()
-    normalized_df = normalize_records(source_df, plan_mapping)
-    if role == "jiuding":
-        normalized_df = _attach_jiuding_filter_company(
-            normalized_df,
-            source_df=source_df,
-            plan_mapping=plan_mapping,
-        )
-    source_hint = plan_mapping.get("factory")
-    normalized_df = attach_record_context(
-        normalized_df,
-        source_filename=filename,
-        source_hint=(
-            source_df[source_hint].astype(str).str.strip().iloc[0]
-            if source_hint and source_hint in source_df.columns and not source_df.empty
-            else None
-        ),
-    )
-
-    return {
-        "normalized_df": normalized_df,
-        "preview": document["preview"],
-        "plan": plan.model_dump(),
-        "filename": filename,
     }
 
 
@@ -453,19 +489,11 @@ def _run_xinfengming_comparison_sync(
     factory_type: str,
     llm_overrides: Dict[str, str],
 ) -> Dict[str, Any]:
-    default_llm_settings = load_llm_settings()
-    task_llm_settings = build_task_llm_settings(default_llm_settings, **llm_overrides)
-
     _update_task(task_id, status="parsing", progress=15, message="正在解析上传文件...")
-    jiuding_reference_rows = build_jiuding_reference_samples([file_item["content"] for file_item in jiuding_files])
-
-    _update_task(task_id, progress=35, message="AI 正在识别有效字段...")
     comparison_payload = compare_xinfengming_data(
         factory_files=factory_files,
         jiuding_files=jiuding_files,
         factory_type=factory_type,
-        llm_settings=task_llm_settings,
-        jiuding_reference_rows=jiuding_reference_rows,
     )
 
     _update_task(task_id, status="comparing", progress=75, message="正在汇总订单并核对差异...")

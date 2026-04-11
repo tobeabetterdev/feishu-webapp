@@ -4,7 +4,7 @@ import io
 import pandas as pd
 
 from api import compare as compare_api
-from services.hengyi_comparison import parse_hengyi_factory_data, parse_hengyi_jiuding_data
+from services.hengyi_order_comparison import parse_hengyi_factory_data, parse_hengyi_jiuding_data
 
 
 def test_parse_hengyi_factory_data_filters_9710_huifeng_rows():

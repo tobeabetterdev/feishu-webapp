@@ -144,7 +144,7 @@ def test_download_result_supports_unicode_filename():
         "message": "比对完成",
         "result": {
             "data": [],
-            "filename": "订单核对_2026-4-11.xlsx",
+            "filename": "新凤鸣订单核对_2026-4-11.xlsx",
             "total_count": 0,
             "download_token": base64.b64encode(b"mock-binary").decode("ascii"),
         },
@@ -167,9 +167,9 @@ def test_run_comparison_sync_uses_xinfengming_service_and_omits_missing_date(mon
         "message": "",
         "result": None,
     }
-    monkeypatch.setattr(compare_api, "load_llm_settings", lambda: SimpleNamespace())
-    monkeypatch.setattr(compare_api, "build_task_llm_settings", lambda settings, **kwargs: settings)
-    monkeypatch.setattr(compare_api, "build_jiuding_reference_samples", lambda file_contents: [{"订单号": "A-001"}])
+    assert not hasattr(compare_api, "load_llm_settings")
+    assert not hasattr(compare_api, "build_task_llm_settings")
+    assert not hasattr(compare_api, "build_jiuding_reference_samples")
 
     observed = {}
 
@@ -178,6 +178,7 @@ def test_run_comparison_sync_uses_xinfengming_service_and_omits_missing_date(mon
         return {
             "result_df": pd.DataFrame([{"日期": None, "订单号": "A-001", "工厂": "江苏", "差量": 1}]),
             "artifacts": {
+                "factory_type": "xinfengming",
                 "factory_files": [
                     {
                         "filename": "factory.xlsx",
@@ -199,10 +200,11 @@ def test_run_comparison_sync_uses_xinfengming_service_and_omits_missing_date(mon
         llm_overrides={},
     )
 
-    assert result["filename"].startswith("订单核对_")
+    assert result["filename"].startswith("新凤鸣订单核对_")
     assert result["filename"].count("_") == 1
     assert observed["kwargs"]["factory_type"] == "xinfengming"
-    assert observed["kwargs"]["jiuding_reference_rows"][0]["订单号"] == "A-001"
+    assert "llm_settings" not in observed["kwargs"]
+    assert "jiuding_reference_rows" not in observed["kwargs"]
     assert result["artifacts"]["factory_files"][0]["plan"]["fields"][1]["name"] == "company"
 
 
@@ -281,6 +283,8 @@ def test_save_result_writes_hengyi_summary_and_detail_workbook(monkeypatch, tmp_
 
     saved = compare_api._save_result(result_df=result_df, artifacts={"factory_type": "hengyi"})
 
+    assert saved["filename"].startswith("恒逸订单核对_")
+
     workbook = pd.ExcelFile(io.BytesIO(base64.b64decode(saved["download_token"])))
 
     assert workbook.sheet_names == ["异常汇总", "异常详情"]
@@ -292,3 +296,75 @@ def test_save_result_writes_hengyi_summary_and_detail_workbook(monkeypatch, tmp_
     detail_df = pd.read_excel(io.BytesIO(base64.b64decode(saved["download_token"])), sheet_name="异常详情", header=1)
     assert "工厂交货单" in detail_df.columns
     assert "久鼎出库单号" in detail_df.columns
+
+
+def test_save_result_writes_xinfengming_summary_and_detail_workbook(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    result_df = pd.DataFrame(
+        [
+            {
+                "日期": "2026/4/9",
+                "单号": "8006349234",
+                "工厂": "中跃",
+                "型号": "POY",
+                "公司": "绍兴柯桥炯炯纺织有限公司",
+                "客户出库数": 33,
+                "久鼎出库数": 30,
+                "待处理数量": 3,
+            }
+        ]
+    )
+    artifacts = {
+        "factory_type": "xinfengming",
+        "factory_records": [
+            {
+                "单号": "8006349234",
+                "交货单号": "8006349234",
+                "交货创建日期": "2026/4/9",
+                "销售组织描述": "中跃化纤",
+                "客户名称": "绍兴柯桥炯炯纺织有限公司",
+                "业务员": "沈祥强",
+                "车牌号": "赣CDL713",
+                "物料组描述": "POY",
+                "件数": 33,
+                "交货单类型": "标准交货单",
+                "包装批号": "NXP0720",
+            }
+        ],
+        "jiuding_records": [
+            {
+                "单号": "8006349234",
+                "出库单号": "8006349234",
+                "订单日期": "2026/4/9",
+                "客户名称": "湖州市中跃化纤有限公司",
+                "会员名称": "绍兴柯桥炯炯纺织有限公司",
+                "产品类型": "POY",
+                "实际出库数量": 30,
+                "子公司名称": None,
+                "订单状态": "订单完成",
+                "送货方式": "自提",
+            }
+        ],
+    }
+
+    saved = compare_api._save_result(result_df=result_df, artifacts=artifacts)
+
+    assert saved["filename"].startswith("新凤鸣订单核对_")
+
+    workbook = pd.ExcelFile(io.BytesIO(base64.b64decode(saved["download_token"])))
+    assert workbook.sheet_names == ["异常汇总", "异常详情"]
+
+    summary_df = pd.read_excel(io.BytesIO(base64.b64decode(saved["download_token"])), sheet_name="异常汇总")
+    assert summary_df.columns.tolist() == ["日期", "单号", "工厂", "型号", "公司", "客户出库数", "久鼎出库数", "待处理数量"]
+
+    detail_df = pd.read_excel(io.BytesIO(base64.b64decode(saved["download_token"])), sheet_name="异常详情", header=1)
+    assert detail_df.columns.tolist()[0] == "异常类型"
+    assert "交货单号" in detail_df.columns
+    assert "汇总单号" in detail_df.columns
+    assert "工厂简称" in detail_df.columns
+    assert "销售组织描述" in detail_df.columns
+    assert "出库单号" in detail_df.columns
+    assert "会员名称" in detail_df.columns
+    assert detail_df.columns.tolist()[-1] == "差异数量"
+    assert detail_df.iloc[0]["异常类型"] == "数量差异"
+    assert str(detail_df.iloc[0]["汇总单号"]) == "8006349234"

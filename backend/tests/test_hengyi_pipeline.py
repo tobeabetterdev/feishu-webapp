@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from services.hengyi_comparison import (
+from services.hengyi_order_comparison import (
     HengyiComparisonError,
     compare_hengyi_data,
     parse_hengyi_factory_data,

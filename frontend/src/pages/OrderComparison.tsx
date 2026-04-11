@@ -16,20 +16,19 @@ import { ComparisonResult } from '../types'
 import {
   createComparison,
   downloadTaskResult,
-  getTaskStatus,
   getTaskResult,
+  getTaskStatus,
 } from '../services/api'
 
 type FactoryType = 'hengyi' | 'xinfengming'
-type StageKey = 'upload' | 'identify' | 'normalize' | 'compare' | 'export' | 'done'
+type StageKey = 'created' | 'parsing' | 'comparing' | 'exporting' | 'done'
 
-const STAGE_META: Record<StageKey, { label: string; min: number; max: number }> = {
-  upload: { label: '上传', min: 0, max: 12 },
-  identify: { label: '识别', min: 12, max: 40 },
-  normalize: { label: '整理', min: 40, max: 68 },
-  compare: { label: '核对', min: 68, max: 88 },
-  export: { label: '输出', min: 88, max: 98 },
-  done: { label: '完成', min: 100, max: 100 },
+const STAGE_META: Record<StageKey, { label: string; hint: string; min: number; max: number }> = {
+  created: { label: '任务创建', hint: '文件已提交，等待系统开始处理。', min: 4, max: 18 },
+  parsing: { label: '文件解析', hint: '正在读取两侧文件并整理可用数据。', min: 18, max: 58 },
+  comparing: { label: '汇总核对', hint: '正在按订单汇总并筛出异常记录。', min: 58, max: 86 },
+  exporting: { label: '生成结果', hint: '正在整理结果并准备展示与下载。', min: 86, max: 97 },
+  done: { label: '处理完成', hint: '结果已生成，可以继续查看或下载。', min: 100, max: 100 },
 }
 
 const ROLE_META: Record<
@@ -57,11 +56,10 @@ const ROLE_META: Record<
 
 function resolveStage(status: string, message: string): StageKey {
   if (status === 'completed') return 'done'
-  if (message.includes('生成结果') || message.includes('结果文件')) return 'export'
-  if (message.includes('汇总') || message.includes('核对') || status === 'comparing') return 'compare'
-  if (message.includes('标准化')) return 'normalize'
-  if (message.includes('识别字段') || message.includes('AI')) return 'identify'
-  return 'upload'
+  if (message.includes('生成结果') || message.includes('结果文件') || message.includes('结果')) return 'exporting'
+  if (message.includes('汇总') || message.includes('核对') || status === 'comparing') return 'comparing'
+  if (message.includes('解析') || message.includes('筛选') || status === 'parsing') return 'parsing'
+  return 'created'
 }
 
 export default function OrderComparison() {
@@ -75,7 +73,7 @@ export default function OrderComparison() {
   const [showProgress, setShowProgress] = useState(false)
   const [taskId, setTaskId] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [activeStage, setActiveStage] = useState<StageKey>('upload')
+  const [activeStage, setActiveStage] = useState<StageKey>('created')
   const progressTimerRef = useRef<number | null>(null)
 
   const clearProgressTimer = () => {
@@ -95,10 +93,10 @@ export default function OrderComparison() {
     progressTimerRef.current = window.setInterval(() => {
       setProgress((current) => {
         if (current >= target) return current
-        const step = stage === 'upload' ? 2 : 1
+        const step = stage === 'created' ? 2 : 1
         return Math.min(current + step, target)
       })
-    }, 500)
+    }, 360)
   }
 
   const updateStage = (status: string, message: string, exactProgress?: number) => {
@@ -123,7 +121,7 @@ export default function OrderComparison() {
     setTaskId(null)
     setProgress(0)
     setProgressMessage('')
-    setActiveStage('upload')
+    setActiveStage('created')
   }
 
   const handleFactoryTypeChange = (type: FactoryType) => {
@@ -150,16 +148,16 @@ export default function OrderComparison() {
     setIsSubmitting(true)
     setShowProgress(true)
     setProgress(4)
-    setProgressMessage('正在上传文件...')
-    setActiveStage('upload')
-    beginSmoothProgress('upload')
+    setProgressMessage('正在提交文件并创建任务...')
+    setActiveStage('created')
+    beginSmoothProgress('created')
     setResults([])
     setTaskId(null)
 
     try {
       const { task_id } = await createComparison(factoryFiles, jiudingFiles, factoryType)
       setTaskId(task_id)
-      updateStage('pending', '任务已创建，等待系统处理...', 5)
+      updateStage('pending', '任务已创建，等待系统开始处理...', 8)
 
       const pollStatus = async () => {
         try {
@@ -227,6 +225,7 @@ export default function OrderComparison() {
   const steps = (Object.keys(STAGE_META) as StageKey[]).map((key) => ({
     key,
     label: STAGE_META[key].label,
+    hint: STAGE_META[key].hint,
     active: activeStage === key,
     done: STAGE_META[key].max < STAGE_META[activeStage].max || activeStage === 'done',
   }))
@@ -261,28 +260,28 @@ export default function OrderComparison() {
                     <h1 className="text-3xl font-semibold tracking-tight text-slate-950 md:text-4xl">
                       订单核对
                     </h1>
-                    <p className="mt-3 text-sm text-slate-500 md:text-base">多文件识别，合并核对，输出结果。</p>
+                    <p className="mt-3 text-sm text-slate-500 md:text-base">多文件合并核对，输出异常结果。</p>
                   </div>
                 </div>
 
-                <div className="grid gap-3 sm:grid-cols-3">
-                  <div className="rounded-[24px] border border-white/75 bg-white/68 p-4">
-                    <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#fff2de] text-[#d98620]">
-                      <ScanSearch size={20} />
+                <div className="grid grid-cols-3 gap-2 sm:gap-3">
+                  <div className="min-w-0 rounded-[24px] border border-white/75 bg-white/68 p-3 sm:p-4">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[#fff2de] text-[#d98620] sm:h-11 sm:w-11">
+                      <ScanSearch size={18} />
                     </div>
-                    <p className="mt-3 text-sm font-semibold text-slate-900">识别</p>
+                    <p className="mt-3 truncate text-sm font-semibold text-slate-900">识别</p>
                   </div>
-                  <div className="rounded-[24px] border border-white/75 bg-white/68 p-4">
-                    <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#def6f4] text-[#0f8b8d]">
-                      <Shapes size={20} />
+                  <div className="min-w-0 rounded-[24px] border border-white/75 bg-white/68 p-3 sm:p-4">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[#def6f4] text-[#0f8b8d] sm:h-11 sm:w-11">
+                      <Shapes size={18} />
                     </div>
-                    <p className="mt-3 text-sm font-semibold text-slate-900">汇总</p>
+                    <p className="mt-3 truncate text-sm font-semibold text-slate-900">汇总</p>
                   </div>
-                  <div className="rounded-[24px] border border-white/75 bg-white/68 p-4">
-                    <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#e8f8ef] text-emerald-600">
-                      <FileDown size={20} />
+                  <div className="min-w-0 rounded-[24px] border border-white/75 bg-white/68 p-3 sm:p-4">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[#e8f8ef] text-emerald-600 sm:h-11 sm:w-11">
+                      <FileDown size={18} />
                     </div>
-                    <p className="mt-3 text-sm font-semibold text-slate-900">输出</p>
+                    <p className="mt-3 truncate text-sm font-semibold text-slate-900">输出</p>
                   </div>
                 </div>
               </div>
@@ -357,19 +356,19 @@ export default function OrderComparison() {
         <section className="rounded-[32px] border border-white/70 bg-white/82 p-5 shadow-[0_24px_60px_-38px_rgba(15,23,42,0.42)] backdrop-blur md:p-6">
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div className="space-y-2">
-              <p className="text-xs font-semibold tracking-[0.24em] text-slate-400">AI 任务</p>
+              <p className="text-xs font-semibold tracking-[0.24em] text-slate-400">核对任务</p>
               <h2 className="text-2xl font-semibold tracking-tight text-slate-950">开始核对</h2>
-              <p className="text-sm text-slate-500">两侧文件就绪后即可执行。</p>
+              <p className="text-sm text-slate-500">提交后将按真实处理环节连续推进。</p>
             </div>
 
             <button
               type="button"
               onClick={handleCompare}
               disabled={factoryFiles.length === 0 || jiudingFiles.length === 0 || isSubmitting}
-              className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-[linear-gradient(135deg,#f3a74f,#0f8b8d)] px-6 py-4 text-base font-semibold text-white shadow-[0_18px_40px_-20px_rgba(15,139,141,0.6)] transition hover:brightness-105 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-white/80 disabled:shadow-none md:w-auto md:min-w-[220px]"
+              className="inline-flex w-full items-center justify-center gap-3 rounded-full bg-[linear-gradient(135deg,#f3a74f,#0f8b8d)] px-6 py-4 text-base font-semibold text-white shadow-[0_18px_40px_-20px_rgba(15,139,141,0.6)] transition hover:brightness-105 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-white/80 disabled:shadow-none md:w-auto md:min-w-[228px]"
             >
               {isSubmitting ? <LoaderCircle className="h-5 w-5 animate-spin" /> : null}
-              <span>{isSubmitting ? '处理中' : '开始核对'}</span>
+              <span>{isSubmitting ? '核对处理中' : '开始核对'}</span>
             </button>
           </div>
         </section>

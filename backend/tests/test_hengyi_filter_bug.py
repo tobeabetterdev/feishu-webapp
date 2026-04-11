@@ -1,10 +1,7 @@
-from io import BytesIO
-
 import pandas as pd
 
-from api import compare as compare_api
-from config.settings import LLMSettings
 from services.data_comparator import DataComparator
+from services.xinfengming_order_comparison import parse_xinfengming_jiuding_data
 
 
 def test_compare_filters_hengyi_by_jiuding_filter_company_column_instead_of_member_name():
@@ -43,43 +40,19 @@ def test_compare_filters_hengyi_by_jiuding_filter_company_column_instead_of_memb
     assert result.iloc[0]["久鼎出库数"] == 8
 
 
-def test_process_single_excel_attaches_jiuding_filter_company_from_customer_name(monkeypatch):
+def test_parse_xinfengming_jiuding_data_attaches_filter_company_from_customer_name():
     source_df = pd.DataFrame(
         [
             {
                 "出库单号": "H-001",
                 "客户名称": "浙江双兔新材料有限公司",
                 "会员名称": "杭州银瑞化纤有限公司",
+                "订单日期": "2026-04-08 08:00:00.0",
                 "实际出库数量": 8,
             }
         ]
     )
-    buffer = BytesIO()
-    source_df.to_excel(buffer, index=False)
+    result = parse_xinfengming_jiuding_data(source_df, source_filename="jiuding.xlsx")
 
-    class StubPlan:
-        def to_column_mapping(self):
-            return {"order_no": "出库单号", "company": "会员名称", "quantity": "实际出库数量"}
-
-        def model_dump(self):
-            return {"fields": {"order_no": "出库单号"}}
-
-    monkeypatch.setattr(
-        compare_api,
-        "convert_excel_to_markdown",
-        lambda content, filename: {"markdown": "", "preview": ""},
-    )
-    monkeypatch.setattr(compare_api, "build_extraction_plan", lambda **kwargs: StubPlan())
-
-    result = compare_api._process_single_excel(
-        content=buffer.getvalue(),
-        filename="jiuding.xlsx",
-        role="jiuding",
-        factory_type="hengyi",
-        llm_settings=LLMSettings(),
-        jiuding_reference_rows=None,
-    )
-
-    normalized_df = result["normalized_df"]
-    assert normalized_df.iloc[0]["公司"] == "杭州银瑞化纤有限公司"
-    assert normalized_df.iloc[0]["筛选公司"] == "浙江双兔新材料有限公司"
+    assert result.iloc[0]["公司"] == "杭州银瑞化纤有限公司"
+    assert result.iloc[0]["筛选公司"] == "浙江双兔新材料有限公司"
