@@ -168,7 +168,11 @@ def _build_result_filename(result_df: pd.DataFrame, *, factory_type: str | None 
         if not result_df.empty and column_name in result_df.columns:
             first_date = result_df[column_name].dropna().iloc[0] if not result_df[column_name].dropna().empty else None
             if first_date is not None and str(first_date).strip():
-                date_for_name = str(first_date).strip().replace("/", "-")
+                parsed_date = pd.to_datetime(first_date, errors="coerce")
+                if pd.isna(parsed_date):
+                    date_for_name = str(first_date).strip().replace("/", "-").split(" ")[0]
+                else:
+                    date_for_name = f"{parsed_date.year}-{parsed_date.month}-{parsed_date.day}"
                 break
 
     factory_prefix_map = {

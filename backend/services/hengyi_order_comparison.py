@@ -71,6 +71,18 @@ def _normalize_date(value: object) -> str | None:
     timestamp = pd.to_datetime(value, errors="coerce")
     if pd.isna(timestamp):
         return None
+    return (
+        f"{timestamp.year}/{timestamp.month}/{timestamp.day} "
+        f"{timestamp.hour:02d}:{timestamp.minute:02d}:{timestamp.second:02d}"
+    )
+
+
+def _normalize_date_key(value: object) -> str | None:
+    if value is None or pd.isna(value):
+        return None
+    timestamp = pd.to_datetime(value, errors="coerce")
+    if pd.isna(timestamp):
+        return None
     return f"{timestamp.year}/{timestamp.month}/{timestamp.day}"
 
 
@@ -311,7 +323,8 @@ def parse_hengyi_jiuding_data(
 def _collect_date_set(df: pd.DataFrame) -> set[str]:
     if df.empty or "日期" not in df.columns:
         return set()
-    return {value for value in df["日期"].dropna().tolist() if str(value).strip()}
+    normalized_dates = {_normalize_date_key(value) for value in df["日期"].dropna().tolist()}
+    return {value for value in normalized_dates if value}
 
 
 def _validate_dates(factory_df: pd.DataFrame, jiuding_df: pd.DataFrame) -> None:

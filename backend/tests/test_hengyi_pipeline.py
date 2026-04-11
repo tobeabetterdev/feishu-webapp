@@ -26,7 +26,7 @@ def test_parse_hengyi_factory_data_maps_code_to_short_name_and_keeps_order_as_st
 
     result = parse_hengyi_factory_data(source_df, source_filename="高新_SAP.xlsx")
 
-    assert result.iloc[0]["日期"] == "2026/4/8"
+    assert result.iloc[0]["日期"] == "2026/4/8 00:00:00"
     assert result.iloc[0]["订单号"] == "0088395730"
     assert result.iloc[0]["工厂简称"] == "恒逸高新"
     assert result.iloc[0]["工厂侧物料组"] == "POY"
@@ -85,6 +85,25 @@ def test_parse_hengyi_jiuding_data_filters_to_selected_factories():
     assert result.iloc[0]["久鼎出库数量"] == 42
 
 
+def test_parse_hengyi_jiuding_data_keeps_time_in_date():
+    source_df = pd.DataFrame(
+        [
+            {
+                "订单日期": "2026-04-08 21:36:04.0",
+                "出库单号": "0088395730",
+                "会员名称": "杭州银瑞化纤有限公司",
+                "客户名称": "浙江恒逸高新材料有限公司",
+                "产品类型": "FDY",
+                "实际出库数量": "42",
+            }
+        ]
+    )
+
+    result = parse_hengyi_jiuding_data(source_df, selected_factory_short_names={"恒逸高新"})
+
+    assert result.iloc[0]["日期"] == "2026/4/8 21:36:04"
+
+
 def test_compare_hengyi_data_stops_when_dates_do_not_match():
     factory_df = pd.DataFrame(
         [
@@ -114,6 +133,38 @@ def test_compare_hengyi_data_stops_when_dates_do_not_match():
 
     with pytest.raises(HengyiComparisonError, match="日期"):
         compare_hengyi_data(factory_df, jiuding_df)
+
+
+def test_compare_hengyi_data_treats_same_day_different_time_as_same_date():
+    factory_df = pd.DataFrame(
+        [
+            {
+                "日期": "2026/4/8 00:00:00",
+                "订单号": "0088395730",
+                "工厂简称": "恒逸高新",
+                "工厂侧送达方": "杭州银瑞化纤有限公司",
+                "工厂侧车牌号": "浙A12345",
+                "工厂托盘数": 42,
+                "工厂交货数量": 42,
+            }
+        ]
+    )
+    jiuding_df = pd.DataFrame(
+        [
+            {
+                "日期": "2026/4/8 21:36:04",
+                "订单号": "0088395730",
+                "工厂简称": "恒逸高新",
+                "久鼎侧会员名称": "杭州银瑞化纤有限公司",
+                "久鼎侧产品类型": "FDY",
+                "久鼎出库数量": 42,
+            }
+        ]
+    )
+
+    result = compare_hengyi_data(factory_df, jiuding_df)
+
+    assert result.empty
 
 
 def test_compare_hengyi_data_suppresses_split_delivery_in_second_pass():

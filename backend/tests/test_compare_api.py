@@ -158,6 +158,15 @@ def test_download_result_supports_unicode_filename():
     assert "filename*=UTF-8''" in response.headers["content-disposition"]
 
 
+def test_build_result_filename_uses_date_only_when_source_contains_time():
+    result_df = pd.DataFrame([{"日期": "2026/4/8 21:36:04"}])
+
+    filename = compare_api._build_result_filename(result_df, factory_type="hengyi")
+
+    assert filename.startswith("恒逸订单核对_2026-4-8_")
+    assert ":" not in filename
+
+
 def test_run_comparison_sync_uses_xinfengming_service_and_omits_missing_date(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     compare_api.tasks["missing-date-task"] = {
