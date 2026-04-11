@@ -52,10 +52,30 @@ warnings.filterwarnings(
     category=UserWarning,
 )
 
-HENGYI_ANOMALY_SHEET_NAMES = {
-    "工厂侧待补录": "工厂侧待补录",
-    "久鼎侧待补录": "久鼎侧待补录",
-    "数量差异待核实": "数量差异待核实",
+HENGYI_DETAIL_COLUMNS = [
+    "异常类型",
+    "工厂交货单",
+    "送达方",
+    "工厂车牌号",
+    "工厂物料组",
+    "工厂",
+    "工厂交货数量",
+    "工厂托盘数",
+    "工厂业务员",
+    "工厂过账日期",
+    "久鼎出库单号",
+    "会员名称",
+    "久鼎产品类型",
+    "久鼎客户名称",
+    "久鼎子公司名称",
+    "久鼎出库数量",
+    "久鼎订单日期",
+    "出库数量差异",
+]
+
+HENGYI_HEADER_GROUPS = {
+    "工厂": ["工厂交货单", "送达方", "工厂车牌号", "工厂物料组", "工厂", "工厂交货数量", "工厂托盘数", "工厂业务员", "工厂过账日期"],
+    "久鼎": ["久鼎出库单号", "会员名称", "久鼎产品类型", "久鼎客户名称", "久鼎子公司名称", "久鼎出库数量", "久鼎订单日期"],
 }
 
 
@@ -131,7 +151,7 @@ def _first_non_empty_value(series: pd.Series):
 
 
 def _build_hengyi_order_key(row: pd.Series) -> str:
-    for column_name in ("交货单(工厂)", "出库单号(久鼎)"):
+    for column_name in ("订单号", "工厂交货单", "久鼎出库单号"):
         value = row.get(column_name)
         if value is not None and not pd.isna(value) and str(value).strip():
             return str(value).strip()
@@ -141,36 +161,27 @@ def _build_hengyi_order_key(row: pd.Series) -> str:
 def _build_hengyi_summary_sheet(result_df: pd.DataFrame) -> pd.DataFrame:
     working = result_df.copy()
     working["订单号"] = working.apply(_build_hengyi_order_key, axis=1)
-    if "托盘数(工厂)" in working.columns:
-        working["托盘数(工厂)"] = working["托盘数(工厂)"].fillna(0)
+    if "工厂托盘数" in working.columns:
+        working["工厂托盘数"] = working["工厂托盘数"].fillna(0)
 
     summary_df = (
         working.groupby(["异常类型", "订单号"], as_index=False)
         .agg(
             {
-                "工厂(工厂)": _first_non_empty_value,
-                "会员名称(久鼎)": _first_non_empty_value,
-                "送达方(工厂)": _first_non_empty_value,
-                "托盘数(工厂)": "sum",
-                "实际出库数量(久鼎)": _first_non_empty_value,
-                "差量": _first_non_empty_value,
-            }
-        )
-        .rename(
-            columns={
-                "工厂(工厂)": "工厂",
-                "会员名称(久鼎)": "会员名称(久鼎)",
-                "送达方(工厂)": "送达方(工厂)",
-                "托盘数(工厂)": "工厂托盘合计",
-                "实际出库数量(久鼎)": "久鼎数量",
+                "工厂": _first_non_empty_value,
+                "会员名称": _first_non_empty_value,
+                "送达方": _first_non_empty_value,
+                "工厂托盘数": "sum",
+                "久鼎出库数量": _first_non_empty_value,
+                "出库数量差异": _first_non_empty_value,
             }
         )
     )
-    summary_df["公司"] = summary_df["会员名称(久鼎)"].combine_first(summary_df["送达方(工厂)"])
+    summary_df["公司"] = summary_df["会员名称"].combine_first(summary_df["送达方"])
     summary_df = summary_df[
-        ["异常类型", "订单号", "工厂", "公司", "工厂托盘合计", "久鼎数量", "差量"]
+        ["异常类型", "订单号", "工厂", "公司", "工厂托盘数", "久鼎出库数量", "出库数量差异"]
     ]
-    anomaly_order = {name: index for index, name in enumerate(HENGYI_ANOMALY_SHEET_NAMES.keys())}
+    anomaly_order = {"工厂缺单": 0, "久鼎缺单": 1, "数量差异": 2}
     summary_df["__sort_order"] = summary_df["异常类型"].map(anomaly_order).fillna(len(anomaly_order))
     summary_df = summary_df.sort_values(["__sort_order", "订单号"], kind="stable").drop(columns="__sort_order")
     summary_df = summary_df.reset_index(drop=True)
@@ -183,43 +194,23 @@ def _write_sheet(writer: pd.ExcelWriter, sheet_name: str, df: pd.DataFrame) -> N
     export_df.to_excel(writer, sheet_name=sheet_name, index=False)
 
 
-def _merge_hengyi_quantity_sheet(writer: pd.ExcelWriter, sheet_name: str, df: pd.DataFrame) -> None:
-    if df.empty:
-        return
+def _write_hengyi_detail_sheet(writer: pd.ExcelWriter, df: pd.DataFrame) -> None:
+    detail_df = df.copy()
+    detail_df = detail_df.reindex(columns=HENGYI_DETAIL_COLUMNS)
+    detail_df = detail_df.astype(object).where(pd.notna(detail_df), None)
+    detail_df.to_excel(writer, sheet_name="异常详情", index=False, startrow=1)
 
-    worksheet = writer.book[sheet_name]
-    columns = list(df.columns)
-    merge_columns = [
-        "异常类型",
-        "订单日期(久鼎)",
-        "出库单号(久鼎)",
-        "客户名称(久鼎)",
-        "会员名称(久鼎)",
-        "产品类型(久鼎)",
-        "实际出库数量(久鼎)",
-        "差量",
-    ]
-    column_index_map = {column_name: index + 1 for index, column_name in enumerate(columns)}
+    worksheet = writer.book["异常详情"]
+    worksheet.freeze_panes = "A3"
 
-    order_keys = df.apply(_build_hengyi_order_key, axis=1).tolist()
-    start = 0
-    while start < len(order_keys):
-        end = start
-        while end + 1 < len(order_keys) and order_keys[end + 1] == order_keys[start]:
-            end += 1
-
-        if end > start:
-            for column_name in merge_columns:
-                if column_name not in column_index_map:
-                    continue
-                column_index = column_index_map[column_name]
-                worksheet.merge_cells(
-                    start_row=start + 2,
-                    start_column=column_index,
-                    end_row=end + 2,
-                    end_column=column_index,
-                )
-        start = end + 1
+    column_lookup = {column_name: index + 1 for index, column_name in enumerate(HENGYI_DETAIL_COLUMNS)}
+    worksheet.cell(row=1, column=column_lookup["异常类型"], value="异常")
+    worksheet.cell(row=1, column=column_lookup["出库数量差异"], value="差异")
+    for group_name, columns in HENGYI_HEADER_GROUPS.items():
+        start_column = column_lookup[columns[0]]
+        end_column = column_lookup[columns[-1]]
+        worksheet.cell(row=1, column=start_column, value=group_name)
+        worksheet.merge_cells(start_row=1, start_column=start_column, end_row=1, end_column=end_column)
 
 
 def _save_hengyi_result_workbook(file_path: str, result_df: pd.DataFrame) -> None:
@@ -227,12 +218,7 @@ def _save_hengyi_result_workbook(file_path: str, result_df: pd.DataFrame) -> Non
 
     with pd.ExcelWriter(file_path, engine="openpyxl") as writer:
         _write_sheet(writer, "异常汇总", summary_df)
-
-        for anomaly_type, sheet_name in HENGYI_ANOMALY_SHEET_NAMES.items():
-            filtered_df = result_df[result_df["异常类型"] == anomaly_type].reset_index(drop=True)
-            _write_sheet(writer, sheet_name, filtered_df)
-            if anomaly_type == "数量差异待核实":
-                _merge_hengyi_quantity_sheet(writer, sheet_name, filtered_df)
+        _write_hengyi_detail_sheet(writer, result_df)
 
 
 def _build_hengyi_result_bytes(result_df: pd.DataFrame) -> bytes:
@@ -241,12 +227,7 @@ def _build_hengyi_result_bytes(result_df: pd.DataFrame) -> bytes:
 
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
         _write_sheet(writer, "异常汇总", summary_df)
-
-        for anomaly_type, sheet_name in HENGYI_ANOMALY_SHEET_NAMES.items():
-            filtered_df = result_df[result_df["异常类型"] == anomaly_type].reset_index(drop=True)
-            _write_sheet(writer, sheet_name, filtered_df)
-            if anomaly_type == "数量差异待核实":
-                _merge_hengyi_quantity_sheet(writer, sheet_name, filtered_df)
+        _write_hengyi_detail_sheet(writer, result_df)
 
     return buffer.getvalue()
 
@@ -394,7 +375,7 @@ def _run_hengyi_comparison_sync(
         parsed_df = parse_hengyi_factory_data(source_df, source_filename=file_item["filename"])
         selected_short_names.update(
             short_name
-            for short_name in parsed_df["工厂"].dropna().tolist()
+            for short_name in parsed_df["工厂简称"].dropna().tolist()
             if str(short_name).strip()
         )
         LOGGER.info(
@@ -444,7 +425,7 @@ def _run_hengyi_comparison_sync(
                     "preview": "",
                     "plan": {
                         "mode": "fixed_columns",
-                        "fields": ["过账日期", "送达方", "交货单", "车牌号", "托盘数", "工厂"],
+                        "fields": ["过账日期", "送达方", "交货单", "车牌号", "托盘数", "工厂", "交货数量", "业务员", "物料组"],
                     },
                 }
                 for item in parsed_factory_files

@@ -7,24 +7,25 @@ interface ResultsTableProps {
 }
 
 type RawRow = Record<string, unknown>
-type HengyiCategory = '工厂侧待补录' | '久鼎侧待补录' | '数量差异待核实'
+type HengyiCategory = '数量差异' | '久鼎缺单' | '工厂缺单'
 
 interface HengyiGroup {
   key: string
   type: HengyiCategory
-  jiudingOrderNo: string
-  factoryOrderNo: string
+  orderNo: string
   factory: string
-  company: string
-  jiudingQty: string
+  orderDate: string
+  memberName: string
+  deliveryName: string
   diff: number | null
-  jiuding: RawRow | null
   rows: RawRow[]
 }
 
-const DIFF_KEYS = ['差量', '待处理数量', 'pendingQty', 'pending_qty'] as const
-const FACTORY_KEYS = ['工厂(工厂)', '工厂', 'factory'] as const
-const HENGYI_TYPES: HengyiCategory[] = ['工厂侧待补录', '久鼎侧待补录', '数量差异待核实']
+const DIFF_KEYS = ['出库数量差异', '差量', '待处理数量', 'pendingQty', 'pending_qty'] as const
+const FACTORY_KEYS = ['工厂', 'factory'] as const
+const HENGYI_TYPES: HengyiCategory[] = ['数量差异', '久鼎缺单', '工厂缺单']
+const HENGYI_FACTORY_DETAIL_COLUMNS = ['送达方', '工厂交货单', '工厂车牌号', '工厂物料组', '工厂交货数量', '工厂托盘数', '工厂业务员', '工厂过账日期']
+const HENGYI_JIUDING_DETAIL_COLUMNS = ['会员名称', '久鼎出库单号', '久鼎产品类型', '久鼎客户名称', '久鼎子公司名称', '久鼎出库数量', '久鼎订单日期']
 
 function toText(value: unknown): string {
   if (value === null || value === undefined || value === '') {
@@ -63,7 +64,7 @@ function buildColumns(data: RawRow[]): string[] {
 }
 
 function isHengyiRow(row: RawRow | undefined): row is RawRow {
-  return !!row && '异常类型' in row
+  return !!row && '异常类型' in row && '订单号' in row && '出库数量差异' in row
 }
 
 function renderDiffBadge(value: unknown) {
@@ -83,7 +84,7 @@ function renderDiffBadge(value: unknown) {
 }
 
 function renderCompactCell(label: string, value: unknown) {
-  if (label === '差量') {
+  if (label === '出库数量差异' || label === '差量') {
     return renderDiffBadge(value)
   }
 
@@ -108,40 +109,36 @@ function buildHengyiGroups(rows: RawRow[]): HengyiGroup[] {
   const groupMap = new Map<string, HengyiGroup>()
 
   rows.forEach((row) => {
-    const type = toText(row['异常类型']) as HengyiCategory
-    const jiudingOrderNo = toText(row['出库单号(久鼎)'])
-    const factoryOrderNo = toText(row['交货单(工厂)'])
-    const key = jiudingOrderNo !== '-' ? `J-${jiudingOrderNo}` : `F-${factoryOrderNo}`
-
-    const existing = groupMap.get(key)
+    const orderNo = toText(row['订单号'])
+    const existing = groupMap.get(orderNo)
     if (existing) {
       existing.rows.push(row)
-      if (!existing.jiuding && jiudingOrderNo !== '-') {
-        existing.jiuding = row
-        existing.jiudingOrderNo = jiudingOrderNo
+      if (existing.memberName === '-' && toText(row['会员名称']) !== '-') {
+        existing.memberName = toText(row['会员名称'])
+      }
+      if (existing.deliveryName === '-' && toText(row['送达方']) !== '-') {
+        existing.deliveryName = toText(row['送达方'])
+      }
+      if (existing.orderDate === '-' && toText(row['订单日期']) !== '-') {
+        existing.orderDate = toText(row['订单日期'])
       }
       return
     }
 
-    groupMap.set(key, {
-      key,
-      type,
-      jiudingOrderNo,
-      factoryOrderNo,
-      factory: toText(row['工厂(工厂)']),
-      company: toText(row['会员名称(久鼎)']) !== '-' ? toText(row['会员名称(久鼎)']) : toText(row['送达方(工厂)']),
-      jiudingQty: toText(row['实际出库数量(久鼎)']),
-      diff: toNumber(row['差量']),
-      jiuding: jiudingOrderNo !== '-' ? row : null,
+    groupMap.set(orderNo, {
+      key: orderNo,
+      type: toText(row['异常类型']) as HengyiCategory,
+      orderNo,
+      factory: toText(row['工厂']),
+      orderDate: toText(row['订单日期']),
+      memberName: toText(row['会员名称']),
+      deliveryName: toText(row['送达方']),
+      diff: toNumber(row['出库数量差异']),
       rows: [row],
     })
   })
 
-  return Array.from(groupMap.values()).sort((left, right) => {
-    const leftOrder = left.jiudingOrderNo !== '-' ? left.jiudingOrderNo : left.factoryOrderNo
-    const rightOrder = right.jiudingOrderNo !== '-' ? right.jiudingOrderNo : right.factoryOrderNo
-    return leftOrder.localeCompare(rightOrder, 'zh-CN')
-  })
+  return Array.from(groupMap.values()).sort((left, right) => left.orderNo.localeCompare(right.orderNo, 'zh-CN'))
 }
 
 function GenericResultsTable({ rows }: { rows: RawRow[] }) {
@@ -237,9 +234,59 @@ function GenericResultsTable({ rows }: { rows: RawRow[] }) {
   )
 }
 
+function HengyiTableBlock({
+  title,
+  columns,
+  row,
+}: {
+  title: string
+  columns: string[]
+  row: RawRow
+}) {
+  return (
+    <div className="overflow-hidden rounded-[20px] border border-slate-200 bg-white">
+      <div className="border-b border-slate-200 px-4 py-3">
+        <p className="text-sm font-semibold tracking-[0.12em] text-slate-400">{title}</p>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="min-w-full text-left">
+          <thead>
+            <tr className="border-b border-slate-200">
+              {columns.map((column) => (
+                <th
+                  key={column}
+                  className={`px-4 py-3 text-sm font-semibold tracking-[0.06em] text-slate-400 whitespace-nowrap ${
+                    column.includes('数量') || column.includes('托盘') ? 'text-right' : ''
+                  }`}
+                >
+                  {column}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            <tr className="hover:bg-slate-50/70">
+              {columns.map((column) => (
+                <td
+                  key={column}
+                  className={`px-4 py-4 whitespace-nowrap ${
+                    column.includes('数量') || column.includes('托盘') ? 'text-right' : ''
+                  }`}
+                >
+                  {renderCompactCell(column, row[column])}
+                </td>
+              ))}
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
 function HengyiResultsView({ rows }: { rows: RawRow[] }) {
   const groups = useMemo(() => buildHengyiGroups(rows), [rows])
-  const [activeType, setActiveType] = useState<HengyiCategory>('数量差异待核实')
+  const [activeType, setActiveType] = useState<HengyiCategory>('数量差异')
   const [expandedKeys, setExpandedKeys] = useState<Record<string, boolean>>({})
 
   const groupedByType = useMemo(() => {
@@ -249,30 +296,31 @@ function HengyiResultsView({ rows }: { rows: RawRow[] }) {
         return acc
       },
       {
-        工厂侧待补录: [],
-        久鼎侧待补录: [],
-        数量差异待核实: [],
+        数量差异: [],
+        久鼎缺单: [],
+        工厂缺单: [],
       },
     )
   }, [groups])
+
   const stats = [
     {
-      type: '工厂侧待补录' as HengyiCategory,
-      label: '工厂待补录',
-      value: groupedByType['工厂侧待补录'].length,
-      activeClassName: 'border-amber-300 bg-amber-500 text-white shadow-[0_18px_38px_-24px_rgba(217,119,6,0.55)]',
+      type: '数量差异' as HengyiCategory,
+      label: '数量待核实',
+      value: groupedByType['数量差异'].length,
+      activeClassName: 'border-rose-300 bg-rose-600 text-white shadow-[0_18px_38px_-24px_rgba(225,29,72,0.52)]',
     },
     {
-      type: '久鼎侧待补录' as HengyiCategory,
+      type: '久鼎缺单' as HengyiCategory,
       label: '久鼎待补录',
-      value: groupedByType['久鼎侧待补录'].length,
+      value: groupedByType['久鼎缺单'].length,
       activeClassName: 'border-cyan-300 bg-cyan-600 text-white shadow-[0_18px_38px_-24px_rgba(8,145,178,0.55)]',
     },
     {
-      type: '数量差异待核实' as HengyiCategory,
-      label: '数量待核实',
-      value: groupedByType['数量差异待核实'].length,
-      activeClassName: 'border-rose-300 bg-rose-600 text-white shadow-[0_18px_38px_-24px_rgba(225,29,72,0.52)]',
+      type: '工厂缺单' as HengyiCategory,
+      label: '工厂待补录',
+      value: groupedByType['工厂缺单'].length,
+      activeClassName: 'border-amber-300 bg-amber-500 text-white shadow-[0_18px_38px_-24px_rgba(217,119,6,0.55)]',
     },
   ]
 
@@ -311,7 +359,7 @@ function HengyiResultsView({ rows }: { rows: RawRow[] }) {
               <Hash size={18} />
             </span>
             <div>
-              <p className="text-base font-semibold text-slate-900">{activeType}</p>
+              <p className="text-base font-semibold text-slate-900">{stats.find((item) => item.type === activeType)?.label}</p>
               <p className="text-sm text-slate-400">{visibleGroups.length} 组</p>
             </div>
           </div>
@@ -326,30 +374,39 @@ function HengyiResultsView({ rows }: { rows: RawRow[] }) {
           ) : (
             visibleGroups.map((group) => {
               const expanded = expandedKeys[group.key] ?? true
-              const summaryOrder = group.jiudingOrderNo !== '-' ? group.jiudingOrderNo : group.factoryOrderNo
+              const headerTone =
+                group.type === '数量差异'
+                  ? 'bg-rose-50/80'
+                  : group.type === '久鼎缺单'
+                    ? 'bg-cyan-50/80'
+                    : 'bg-amber-50/80'
 
               return (
                 <div key={group.key} className="overflow-hidden rounded-[24px] border border-slate-200 bg-white">
                   <button
                     type="button"
                     onClick={() => toggleGroup(group.key)}
-                    className="flex w-full items-center justify-between gap-4 bg-slate-50/80 px-4 py-4 text-left transition hover:bg-slate-100/80"
+                    className={`flex w-full items-center justify-between gap-4 px-4 py-4 text-left transition hover:bg-slate-100/80 ${headerTone}`}
                   >
-                    <div className="grid flex-1 gap-4 md:grid-cols-[1.2fr_1fr_1.2fr_auto]">
+                    <div className="grid flex-1 gap-4 md:grid-cols-[1.1fr_1fr_1fr_1fr_auto]">
                       <div>
-                        <p className="text-sm font-semibold tracking-[0.08em] text-slate-400">订单</p>
-                        <div className="mt-2">{renderCompactCell('订单', summaryOrder)}</div>
+                        <p className="text-sm font-semibold tracking-[0.08em] text-slate-400">订单号</p>
+                        <div className="mt-2">{renderCompactCell('订单号', group.orderNo)}</div>
+                      </div>
+                      <div>
+                        <p className="text-sm font-semibold tracking-[0.08em] text-slate-400">异常类型</p>
+                        <p className="mt-2 text-base font-medium text-slate-800">{group.type}</p>
                       </div>
                       <div>
                         <p className="text-sm font-semibold tracking-[0.08em] text-slate-400">工厂</p>
                         <p className="mt-2 text-base font-medium text-slate-800">{group.factory}</p>
                       </div>
                       <div>
-                        <p className="text-sm font-semibold tracking-[0.08em] text-slate-400">公司</p>
-                        <p className="mt-2 text-base font-medium text-slate-800">{group.company}</p>
+                        <p className="text-sm font-semibold tracking-[0.08em] text-slate-400">订单日期</p>
+                        <p className="mt-2 text-base font-medium text-slate-800">{group.orderDate}</p>
                       </div>
                       <div className="text-right">
-                        <p className="text-sm font-semibold tracking-[0.08em] text-slate-400">差量</p>
+                        <p className="text-sm font-semibold tracking-[0.08em] text-slate-400">差异</p>
                         <div className="mt-2">{renderDiffBadge(group.diff)}</div>
                       </div>
                     </div>
@@ -360,110 +417,23 @@ function HengyiResultsView({ rows }: { rows: RawRow[] }) {
 
                   {expanded ? (
                     <div className="space-y-4 px-4 py-4">
-                      <div className="hidden rounded-[20px] border border-slate-200 bg-[linear-gradient(135deg,rgba(240,252,252,0.88),rgba(255,248,235,0.72))] p-4">
-                        <p className="text-sm font-semibold tracking-[0.12em] text-slate-400">久鼎摘要</p>
-                        <div className="mt-3 flex flex-wrap gap-x-6 gap-y-3 text-base text-slate-700">
-                          <div className="flex items-center gap-2 whitespace-nowrap">
-                            <span className="text-slate-400">出库单号</span>
-                            {renderCompactCell('出库单号', group.jiuding?.['出库单号(久鼎)'])}
-                          </div>
-                          <div className="flex items-center gap-2 whitespace-nowrap">
-                            <span className="text-slate-400">客户名称</span>
-                            <span>{toText(group.jiuding?.['客户名称(久鼎)'])}</span>
-                          </div>
-                          <div className="flex items-center gap-2 whitespace-nowrap">
-                            <span className="text-slate-400">会员名称</span>
-                            <span>{toText(group.jiuding?.['会员名称(久鼎)'])}</span>
-                          </div>
-                          <div className="flex items-center gap-2 whitespace-nowrap">
-                            <span className="text-slate-400">久鼎数量</span>
-                            <span className="font-semibold text-slate-900">{group.jiudingQty}</span>
-                          </div>
-                          <div className="flex items-center gap-2 whitespace-nowrap">
-                            <span className="text-slate-400">订单日期</span>
-                            <span>{toText(group.jiuding?.['订单日期(久鼎)'])}</span>
-                          </div>
+                      <div className="grid gap-3 md:grid-cols-2">
+                        <div className="rounded-[20px] border border-slate-200 bg-slate-50/70 px-4 py-3">
+                          <p className="text-sm font-semibold tracking-[0.08em] text-slate-400">送达方</p>
+                          <p className="mt-2 text-base font-medium text-slate-800">{group.deliveryName}</p>
+                        </div>
+                        <div className="rounded-[20px] border border-slate-200 bg-slate-50/70 px-4 py-3">
+                          <p className="text-sm font-semibold tracking-[0.08em] text-slate-400">会员名称</p>
+                          <p className="mt-2 text-base font-medium text-slate-800">{group.memberName}</p>
                         </div>
                       </div>
 
-                      <div className="overflow-hidden rounded-[20px] border border-slate-200 bg-[linear-gradient(135deg,rgba(240,252,252,0.88),rgba(255,248,235,0.72))]">
-                        <div className="border-b border-slate-200/80 px-4 py-3">
-                          <p className="text-sm font-semibold tracking-[0.12em] text-slate-400">久鼎摘要</p>
+                      {group.rows.map((row, index) => (
+                        <div key={`${group.key}-${index}`} className="grid gap-4 xl:grid-cols-2">
+                          <HengyiTableBlock title={index === 0 ? '工厂明细' : `工厂明细 ${index + 1}`} columns={HENGYI_FACTORY_DETAIL_COLUMNS} row={row} />
+                          <HengyiTableBlock title={index === 0 ? '久鼎明细' : `久鼎明细 ${index + 1}`} columns={HENGYI_JIUDING_DETAIL_COLUMNS} row={row} />
                         </div>
-                        <div className="overflow-x-auto">
-                          <table className="min-w-full text-left">
-                            <thead>
-                              <tr className="border-b border-slate-200/80">
-                                {['出库单号', '客户名称', '会员名称', '久鼎数量', '订单日期'].map((column) => (
-                                  <th
-                                    key={column}
-                                    className={`px-4 py-3 text-sm font-semibold tracking-[0.06em] text-slate-400 whitespace-nowrap ${
-                                      column === '久鼎数量' ? 'text-right' : ''
-                                    }`}
-                                  >
-                                    {column}
-                                  </th>
-                                ))}
-                              </tr>
-                            </thead>
-                            <tbody>
-                              <tr className="bg-white/55">
-                                <td className="px-4 py-4 whitespace-nowrap">
-                                  {renderCompactCell('出库单号', group.jiuding?.['出库单号(久鼎)'])}
-                                </td>
-                                <td className="px-4 py-4 whitespace-nowrap text-base text-slate-700">
-                                  {toText(group.jiuding?.['客户名称(久鼎)'])}
-                                </td>
-                                <td className="px-4 py-4 whitespace-nowrap text-base text-slate-700">
-                                  {toText(group.jiuding?.['会员名称(久鼎)'])}
-                                </td>
-                                <td className="px-4 py-4 whitespace-nowrap text-right text-base font-semibold text-slate-900">
-                                  {group.jiudingQty}
-                                </td>
-                                <td className="px-4 py-4 whitespace-nowrap text-base text-slate-700">
-                                  {toText(group.jiuding?.['订单日期(久鼎)'])}
-                                </td>
-                              </tr>
-                            </tbody>
-                          </table>
-                        </div>
-                      </div>
-
-                      <div className="rounded-[20px] border border-slate-200 bg-white">
-                        <div className="border-b border-slate-200 px-4 py-3">
-                          <p className="text-sm font-semibold tracking-[0.12em] text-slate-400">工厂明细</p>
-                        </div>
-                        <div className="overflow-x-auto">
-                          <table className="min-w-full text-left">
-                            <thead>
-                              <tr className="border-b border-slate-200">
-                                {['交货单', '工厂', '送达方', '车牌号', '型号', '托盘数'].map((column) => (
-                                  <th
-                                    key={column}
-                                    className={`px-4 py-3 text-sm font-semibold tracking-[0.06em] text-slate-400 whitespace-nowrap ${
-                                      column === '托盘数' ? 'text-right' : ''
-                                    }`}
-                                  >
-                                    {column}
-                                  </th>
-                                ))}
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-100">
-                              {group.rows.map((row, index) => (
-                                <tr key={`${group.key}-${index}`} className="hover:bg-slate-50/70">
-                                  <td className="px-4 py-4 whitespace-nowrap">{renderCompactCell('交货单', row['交货单(工厂)'])}</td>
-                                  <td className="px-4 py-4 whitespace-nowrap text-base text-slate-700">{toText(row['工厂(工厂)'])}</td>
-                                  <td className="px-4 py-4 whitespace-nowrap text-base text-slate-700">{toText(row['送达方(工厂)'])}</td>
-                                  <td className="px-4 py-4 whitespace-nowrap text-base text-slate-700">{toText(row['车牌号(工厂)'])}</td>
-                                  <td className="px-4 py-4 whitespace-nowrap text-base text-slate-700">{toText(row['型号(工厂)'])}</td>
-                                  <td className="px-4 py-4 whitespace-nowrap text-right text-base font-semibold text-slate-900">{toText(row['托盘数(工厂)'])}</td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      </div>
+                      ))}
                     </div>
                   ) : null}
                 </div>

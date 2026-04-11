@@ -206,60 +206,75 @@ def test_run_comparison_sync_uses_xinfengming_service_and_omits_missing_date(mon
     assert result["artifacts"]["factory_files"][0]["plan"]["fields"][1]["name"] == "company"
 
 
-def test_save_result_writes_hengyi_multi_sheet_workbook(monkeypatch, tmp_path):
+def test_save_result_writes_hengyi_summary_and_detail_workbook(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     result_df = pd.DataFrame(
         [
             {
-                "异常类型": "工厂侧待补录",
-                "过账日期(工厂)": "2026/4/8",
-                "交货单(工厂)": "F001",
-                "工厂(工厂)": "恒逸高新(3100)",
-                "送达方(工厂)": "杭州银瑞化纤有限公司",
-                "车牌号(工厂)": "浙A12345",
-                "型号(工厂)": "FDY",
-                "托盘数(工厂)": 12,
-                "订单日期(久鼎)": None,
-                "出库单号(久鼎)": None,
-                "客户名称(久鼎)": None,
-                "会员名称(久鼎)": None,
-                "产品类型(久鼎)": None,
-                "实际出库数量(久鼎)": None,
-                "差量": 12,
+                "异常类型": "久鼎缺单",
+                "订单号": "F001",
+                "工厂": "恒逸高新(3100)",
+                "订单日期": "2026/4/8",
+                "送达方": "杭州银瑞化纤有限公司",
+                "工厂交货单": "F001",
+                "工厂车牌号": "浙A12345",
+                "工厂物料组": "FDY",
+                "工厂交货数量": 12,
+                "工厂托盘数": 12,
+                "工厂业务员": None,
+                "工厂过账日期": "2026/4/8",
+                "会员名称": None,
+                "久鼎出库单号": None,
+                "久鼎产品类型": None,
+                "久鼎客户名称": None,
+                "久鼎子公司名称": None,
+                "久鼎出库数量": None,
+                "久鼎订单日期": None,
+                "出库数量差异": 12,
             },
             {
-                "异常类型": "久鼎侧待补录",
-                "过账日期(工厂)": None,
-                "交货单(工厂)": None,
-                "工厂(工厂)": None,
-                "送达方(工厂)": None,
-                "车牌号(工厂)": None,
-                "型号(工厂)": None,
-                "托盘数(工厂)": None,
-                "订单日期(久鼎)": "2026/4/8",
-                "出库单号(久鼎)": "J001",
-                "客户名称(久鼎)": "浙江恒逸高新材料有限公司",
-                "会员名称(久鼎)": "杭州银瑞化纤有限公司",
-                "产品类型(久鼎)": "FDY",
-                "实际出库数量(久鼎)": 9,
-                "差量": -9,
+                "异常类型": "工厂缺单",
+                "订单号": "J001",
+                "工厂": "恒逸高新",
+                "订单日期": "2026/4/8",
+                "送达方": None,
+                "工厂交货单": None,
+                "工厂车牌号": None,
+                "工厂物料组": None,
+                "工厂交货数量": None,
+                "工厂托盘数": None,
+                "工厂业务员": None,
+                "工厂过账日期": None,
+                "会员名称": "杭州银瑞化纤有限公司",
+                "久鼎出库单号": "J001",
+                "久鼎产品类型": "FDY",
+                "久鼎客户名称": "恒逸高新",
+                "久鼎子公司名称": "浙江恒逸高新材料有限公司",
+                "久鼎出库数量": 9,
+                "久鼎订单日期": "2026/4/8",
+                "出库数量差异": -9,
             },
             {
-                "异常类型": "数量差异待核实",
-                "过账日期(工厂)": "2026/4/8",
-                "交货单(工厂)": "M001",
-                "工厂(工厂)": "恒逸高新(3100)",
-                "送达方(工厂)": "杭州银瑞化纤有限公司",
-                "车牌号(工厂)": "浙A99999",
-                "型号(工厂)": "FDY",
-                "托盘数(工厂)": 10,
-                "订单日期(久鼎)": "2026/4/8",
-                "出库单号(久鼎)": "M001",
-                "客户名称(久鼎)": "浙江恒逸高新材料有限公司",
-                "会员名称(久鼎)": "杭州银瑞化纤有限公司",
-                "产品类型(久鼎)": "FDY",
-                "实际出库数量(久鼎)": 15,
-                "差量": -5,
+                "异常类型": "数量差异",
+                "订单号": "M001",
+                "工厂": "恒逸高新(3100)",
+                "订单日期": "2026/4/8",
+                "送达方": "杭州银瑞化纤有限公司",
+                "工厂交货单": "M001",
+                "工厂车牌号": "浙A99999",
+                "工厂物料组": "FDY",
+                "工厂交货数量": 10,
+                "工厂托盘数": 10,
+                "工厂业务员": None,
+                "工厂过账日期": "2026/4/8",
+                "会员名称": "杭州银瑞化纤有限公司",
+                "久鼎出库单号": "M001",
+                "久鼎产品类型": "FDY",
+                "久鼎客户名称": "恒逸高新",
+                "久鼎子公司名称": "浙江恒逸高新材料有限公司",
+                "久鼎出库数量": 15,
+                "久鼎订单日期": "2026/4/8",
+                "出库数量差异": -5,
             },
         ]
     )
@@ -268,8 +283,12 @@ def test_save_result_writes_hengyi_multi_sheet_workbook(monkeypatch, tmp_path):
 
     workbook = pd.ExcelFile(io.BytesIO(base64.b64decode(saved["download_token"])))
 
-    assert workbook.sheet_names == ["异常汇总", "工厂侧待补录", "久鼎侧待补录", "数量差异待核实"]
+    assert workbook.sheet_names == ["异常汇总", "异常详情"]
 
     summary_df = pd.read_excel(io.BytesIO(base64.b64decode(saved["download_token"])), sheet_name="异常汇总")
     assert "异常类型" in summary_df.columns
-    assert summary_df["异常类型"].tolist() == ["工厂侧待补录", "久鼎侧待补录", "数量差异待核实"]
+    assert summary_df["异常类型"].tolist() == ["工厂缺单", "久鼎缺单", "数量差异"]
+
+    detail_df = pd.read_excel(io.BytesIO(base64.b64decode(saved["download_token"])), sheet_name="异常详情", header=1)
+    assert "工厂交货单" in detail_df.columns
+    assert "久鼎出库单号" in detail_df.columns
