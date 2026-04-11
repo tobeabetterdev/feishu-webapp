@@ -26,7 +26,7 @@ def test_parse_hengyi_factory_data_maps_code_to_short_name_and_keeps_order_as_st
 
     result = parse_hengyi_factory_data(source_df, source_filename="高新_SAP.xlsx")
 
-    assert result.iloc[0]["日期"] == "2026/4/8 00:00:00"
+    assert result.iloc[0]["日期"] == "2026/4/8"
     assert result.iloc[0]["订单号"] == "0088395730"
     assert result.iloc[0]["工厂简称"] == "恒逸高新"
     assert result.iloc[0]["工厂侧物料组"] == "POY"

@@ -164,7 +164,7 @@ def _update_task(
 
 def _build_result_filename(result_df: pd.DataFrame, *, factory_type: str | None = None) -> str:
     date_for_name = ""
-    for column_name in ("日期", "过账日期(工厂)", "订单日期(久鼎)"):
+    for column_name in ("日期", "订单日期", "工厂过账日期", "久鼎订单日期"):
         if not result_df.empty and column_name in result_df.columns:
             first_date = result_df[column_name].dropna().iloc[0] if not result_df[column_name].dropna().empty else None
             if first_date is not None and str(first_date).strip():

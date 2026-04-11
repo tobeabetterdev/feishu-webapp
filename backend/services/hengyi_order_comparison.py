@@ -71,10 +71,9 @@ def _normalize_date(value: object) -> str | None:
     timestamp = pd.to_datetime(value, errors="coerce")
     if pd.isna(timestamp):
         return None
-    return (
-        f"{timestamp.year}/{timestamp.month}/{timestamp.day} "
-        f"{timestamp.hour:02d}:{timestamp.minute:02d}:{timestamp.second:02d}"
-    )
+    if timestamp.hour == 0 and timestamp.minute == 0 and timestamp.second == 0:
+        return f"{timestamp.year}/{timestamp.month}/{timestamp.day}"
+    return f"{timestamp.year}/{timestamp.month}/{timestamp.day} {timestamp.hour:02d}:{timestamp.minute:02d}:{timestamp.second:02d}"
 
 
 def _normalize_date_key(value: object) -> str | None:
