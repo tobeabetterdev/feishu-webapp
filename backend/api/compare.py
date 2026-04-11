@@ -12,6 +12,7 @@ import uuid
 import warnings
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from urllib.parse import quote
 
 import pandas as pd
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
@@ -657,11 +658,17 @@ async def download_result(task_id: str):
         raise HTTPException(status_code=404, detail="结果文件不存在")
 
     file_bytes = base64.b64decode(download_token)
+    safe_ascii_filename = "download.xlsx"
+    encoded_filename = quote(filename)
+    content_disposition = (
+        f"attachment; filename=\"{safe_ascii_filename}\"; "
+        f"filename*=UTF-8''{encoded_filename}"
+    )
 
     return StreamingResponse(
         io.BytesIO(file_bytes),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={"Content-Disposition": content_disposition},
     )
 
 

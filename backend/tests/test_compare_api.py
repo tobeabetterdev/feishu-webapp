@@ -135,6 +135,29 @@ def test_get_task_result_replaces_nan_with_null():
     assert response.json()["data"][0]["差量"] is None
 
 
+def test_download_result_supports_unicode_filename():
+    task_id = "unicode-download-task"
+    compare_api.tasks[task_id] = {
+        "task_id": task_id,
+        "status": "completed",
+        "progress": 100,
+        "message": "比对完成",
+        "result": {
+            "data": [],
+            "filename": "订单核对_2026-4-11.xlsx",
+            "total_count": 0,
+            "download_token": base64.b64encode(b"mock-binary").decode("ascii"),
+        },
+    }
+
+    response = client.get(f"/api/compare/{task_id}/download")
+
+    assert response.status_code == 200
+    assert response.content == b"mock-binary"
+    assert "attachment;" in response.headers["content-disposition"]
+    assert "filename*=UTF-8''" in response.headers["content-disposition"]
+
+
 def test_run_comparison_sync_uses_xinfengming_service_and_omits_missing_date(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     compare_api.tasks["missing-date-task"] = {
