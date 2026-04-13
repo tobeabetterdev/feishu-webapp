@@ -50,28 +50,28 @@ warnings.filterwarnings(
 
 HENGYI_DETAIL_COLUMNS = [
     "异常类型",
-    "工厂交货单",
+    "交货单",
     "送达方",
-    "工厂车牌号",
-    "工厂物料组",
+    "车牌号",
+    "物料组",
     "工厂",
-    "工厂交货数量",
-    "工厂托盘数",
-    "工厂业务员",
-    "工厂过账日期",
-    "久鼎出库单号",
+    "交货数量",
+    "托盘数",
+    "业务员",
+    "过账日期",
+    "出库单号",
     "会员名称",
-    "久鼎产品类型",
-    "久鼎客户名称",
-    "久鼎子公司名称",
-    "久鼎出库数量",
-    "久鼎订单日期",
+    "产品类型",
+    "客户名称",
+    "子公司名称",
+    "出库数量",
+    "订单日期2",
     "出库数量差异",
 ]
 
 HENGYI_HEADER_GROUPS = {
-    "工厂": ["工厂交货单", "送达方", "工厂车牌号", "工厂物料组", "工厂", "工厂交货数量", "工厂托盘数", "工厂业务员", "工厂过账日期"],
-    "久鼎": ["久鼎出库单号", "会员名称", "久鼎产品类型", "久鼎客户名称", "久鼎子公司名称", "久鼎出库数量", "久鼎订单日期"],
+    "工厂": ["交货单", "送达方", "车牌号", "物料组", "工厂", "交货数量", "托盘数", "业务员", "过账日期"],
+    "久鼎": ["出库单号", "会员名称", "产品类型", "客户名称", "子公司名称", "出库数量", "订单日期2"],
 }
 
 XINFENGMING_SUMMARY_COLUMNS = [
@@ -92,7 +92,7 @@ XINFENGMING_DETAIL_COLUMNS = [
     "销售组织描述",
     "客户名称",
     "汇总单号",
-    "工厂简称",
+    "工厂",
     "业务员",
     "车牌号",
     "物料组描述",
@@ -101,7 +101,7 @@ XINFENGMING_DETAIL_COLUMNS = [
     "包装批号",
     "出库单号",
     "订单日期",
-    "久鼎客户名称",
+    "客户名称2",
     "会员名称",
     "产品类型",
     "实际出库数量",
@@ -112,8 +112,8 @@ XINFENGMING_DETAIL_COLUMNS = [
 ]
 
 XINFENGMING_HEADER_GROUPS = {
-    "工厂": ["交货单号", "交货创建日期", "销售组织描述", "客户名称", "汇总单号", "工厂简称", "业务员", "车牌号", "物料组描述", "件数", "交货单类型", "包装批号"],
-    "久鼎": ["出库单号", "订单日期", "久鼎客户名称", "会员名称", "产品类型", "实际出库数量", "子公司名称", "订单状态", "送货方式", "差异数量"],
+    "工厂": ["交货单号", "交货创建日期", "销售组织描述", "客户名称", "汇总单号", "工厂", "业务员", "车牌号", "物料组描述", "件数", "交货单类型", "包装批号"],
+    "久鼎": ["出库单号", "订单日期", "客户名称2", "会员名称", "产品类型", "实际出库数量", "子公司名称", "订单状态", "送货方式", "差异数量"],
 }
 
 
@@ -197,7 +197,7 @@ def _first_non_empty_value(series: pd.Series):
 
 
 def _build_hengyi_order_key(row: pd.Series) -> str:
-    for column_name in ("订单号", "工厂交货单", "久鼎出库单号"):
+    for column_name in ("订单号", "交货单", "出库单号"):
         value = row.get(column_name)
         if value is not None and not pd.isna(value) and str(value).strip():
             return str(value).strip()
@@ -207,8 +207,8 @@ def _build_hengyi_order_key(row: pd.Series) -> str:
 def _build_hengyi_summary_sheet(result_df: pd.DataFrame) -> pd.DataFrame:
     working = result_df.copy()
     working["订单号"] = working.apply(_build_hengyi_order_key, axis=1)
-    if "工厂托盘数" in working.columns:
-        working["工厂托盘数"] = working["工厂托盘数"].fillna(0)
+    if "托盘数" in working.columns:
+        working["托盘数"] = working["托盘数"].fillna(0)
 
     summary_df = (
         working.groupby(["异常类型", "订单号"], as_index=False)
@@ -217,15 +217,15 @@ def _build_hengyi_summary_sheet(result_df: pd.DataFrame) -> pd.DataFrame:
                 "工厂": _first_non_empty_value,
                 "会员名称": _first_non_empty_value,
                 "送达方": _first_non_empty_value,
-                "工厂托盘数": "sum",
-                "久鼎出库数量": _first_non_empty_value,
+                "托盘数": "sum",
+                "出库数量": _first_non_empty_value,
                 "出库数量差异": _first_non_empty_value,
             }
         )
     )
     summary_df["公司"] = summary_df["会员名称"].combine_first(summary_df["送达方"])
     summary_df = summary_df[
-        ["异常类型", "订单号", "工厂", "公司", "工厂托盘数", "久鼎出库数量", "出库数量差异"]
+        ["异常类型", "订单号", "工厂", "公司", "托盘数", "出库数量", "出库数量差异"]
     ]
     anomaly_order = {"工厂缺单": 0, "久鼎缺单": 1, "数量差异": 2}
     summary_df["__sort_order"] = summary_df["异常类型"].map(anomaly_order).fillna(len(anomaly_order))
@@ -320,7 +320,7 @@ def _build_xinfengming_detail_sheet(result_df: pd.DataFrame, artifacts: Dict[str
                     "销售组织描述": factory_detail.get("销售组织描述"),
                     "客户名称": factory_detail.get("客户名称"),
                     "汇总单号": order_no,
-                    "工厂简称": summary_row.get("工厂"),
+                    "工厂": summary_row.get("工厂"),
                     "业务员": factory_detail.get("业务员"),
                     "车牌号": factory_detail.get("车牌号"),
                     "物料组描述": factory_detail.get("物料组描述"),
@@ -329,7 +329,7 @@ def _build_xinfengming_detail_sheet(result_df: pd.DataFrame, artifacts: Dict[str
                     "包装批号": factory_detail.get("包装批号"),
                     "出库单号": jiuding_detail.get("出库单号"),
                     "订单日期": jiuding_detail.get("订单日期"),
-                    "久鼎客户名称": jiuding_detail.get("客户名称"),
+                    "客户名称2": jiuding_detail.get("客户名称"),
                     "会员名称": jiuding_detail.get("会员名称"),
                     "产品类型": jiuding_detail.get("产品类型"),
                     "实际出库数量": jiuding_detail.get("实际出库数量"),

@@ -56,6 +56,44 @@ def test_parse_hengyi_factory_data_falls_back_to_filename_alias_when_code_is_unk
     assert result.iloc[0]["工厂侧物料组"] == "FDY"
 
 
+def test_parse_hengyi_factory_data_deduplicates_same_display_rows():
+    source_df = pd.DataFrame(
+        [
+            {
+                "过账日期": "2026-04-12 00:00:00",
+                "送达方": "浙江物产经编供应链有限公司",
+                "交货单": "0088405489",
+                "车牌号": "ZT-浙A33H55",
+                "托盘数": "8",
+                "工厂": "9710",
+                "物料组": "130",
+                "物料描述": "POY-220dtex/***f-XA161001SS-AA",
+                "交货数量": "5760",
+                "业务员": "杨俊先",
+            },
+            {
+                "过账日期": "2026-04-12 00:00:00",
+                "送达方": "浙江物产经编供应链有限公司",
+                "交货单": "0088405489",
+                "车牌号": "ZT-浙A33H55",
+                "托盘数": "8",
+                "工厂": "9710",
+                "物料组": "130",
+                "物料描述": "POY-222dtex/144f-XA051009-AA",
+                "交货数量": "5760",
+                "业务员": "杨俊先",
+            },
+        ]
+    )
+
+    result = parse_hengyi_factory_data(source_df, source_filename="4.12.xlsx")
+
+    assert len(result) == 1
+    assert result.iloc[0]["订单号"] == "0088405489"
+    assert result.iloc[0]["工厂托盘数"] == 8
+    assert result.iloc[0]["工厂交货数量"] == 5760
+
+
 def test_parse_hengyi_jiuding_data_filters_to_selected_factories():
     source_df = pd.DataFrame(
         [
@@ -230,8 +268,8 @@ def test_compare_hengyi_data_keeps_factory_only_missing_order_as_exception():
     result = compare_hengyi_data(factory_df, jiuding_df)
 
     assert len(result) == 1
-    assert result.iloc[0]["工厂交货单"] == "B"
-    assert result.iloc[0]["久鼎出库单号"] is None
+    assert result.iloc[0]["交货单"] == "B"
+    assert result.iloc[0]["出库单号"] is None
     assert result.iloc[0]["异常类型"] == "久鼎缺单"
     assert result.iloc[0]["出库数量差异"] == 22
 
@@ -288,29 +326,29 @@ def test_compare_hengyi_data_outputs_new_business_fields():
         "工厂",
         "订单日期",
         "送达方",
-        "工厂交货单",
-        "工厂车牌号",
-        "工厂物料组",
-        "工厂交货数量",
-        "工厂托盘数",
-        "工厂业务员",
-        "工厂过账日期",
+        "交货单",
+        "车牌号",
+        "物料组",
+        "交货数量",
+        "托盘数",
+        "业务员",
+        "过账日期",
         "会员名称",
-        "久鼎出库单号",
-        "久鼎产品类型",
-        "久鼎客户名称",
-        "久鼎子公司名称",
-        "久鼎出库数量",
-        "久鼎订单日期",
+        "出库单号",
+        "产品类型",
+        "客户名称",
+        "子公司名称",
+        "出库数量",
+        "订单日期2",
         "出库数量差异",
     ]
     assert result.iloc[0]["异常类型"] == "数量差异"
     assert result.iloc[1]["异常类型"] == "工厂缺单"
-    assert result["工厂交货单"].tolist() == ["0088395730", None]
-    assert result["久鼎出库单号"].tolist() == ["0088395730", "0088396000"]
+    assert result["交货单"].tolist() == ["0088395730", None]
+    assert result["出库单号"].tolist() == ["0088395730", "0088396000"]
     assert result.iloc[0]["工厂"] == "恒逸高新(3100)"
-    assert result.iloc[0]["工厂托盘数"] == 36
-    assert result.iloc[0]["久鼎出库数量"] == 42
+    assert result.iloc[0]["托盘数"] == 36
+    assert result.iloc[0]["出库数量"] == 42
     assert result.iloc[0]["出库数量差异"] == -6
     assert result.iloc[1]["工厂"] == "恒逸高新"
     assert result.iloc[1]["会员名称"] == "海宁锡铭经编有限公司"
@@ -384,8 +422,8 @@ def test_compare_hengyi_data_expands_factory_rows_and_keeps_jiuding_once_per_ord
     result = compare_hengyi_data(factory_df, jiuding_df)
 
     assert result["异常类型"].tolist() == ["数量差异", "数量差异", "数量差异"]
-    assert result["工厂交货单"].tolist() == ["A100", "A100", "B200"]
-    assert result["久鼎出库单号"].tolist() == ["A100", None, "B200"]
-    assert result["工厂托盘数"].tolist() == [20, 16, 10]
-    assert result["久鼎出库数量"].tolist() == [42, None, 9]
+    assert result["交货单"].tolist() == ["A100", "A100", "B200"]
+    assert result["出库单号"].tolist() == ["A100", None, "B200"]
+    assert result["托盘数"].tolist() == [20, 16, 10]
+    assert result["出库数量"].tolist() == [42, None, 9]
     assert result["出库数量差异"].tolist() == [-6, None, 1]

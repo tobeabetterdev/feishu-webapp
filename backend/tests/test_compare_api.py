@@ -227,20 +227,20 @@ def test_save_result_writes_hengyi_summary_and_detail_workbook(monkeypatch, tmp_
                 "工厂": "恒逸高新(3100)",
                 "订单日期": "2026/4/8",
                 "送达方": "杭州银瑞化纤有限公司",
-                "工厂交货单": "F001",
-                "工厂车牌号": "浙A12345",
-                "工厂物料组": "FDY",
-                "工厂交货数量": 12,
-                "工厂托盘数": 12,
-                "工厂业务员": None,
-                "工厂过账日期": "2026/4/8",
+                "交货单": "F001",
+                "车牌号": "浙A12345",
+                "物料组": "FDY",
+                "交货数量": 12,
+                "托盘数": 12,
+                "业务员": None,
+                "过账日期": "2026/4/8",
                 "会员名称": None,
-                "久鼎出库单号": None,
-                "久鼎产品类型": None,
-                "久鼎客户名称": None,
-                "久鼎子公司名称": None,
-                "久鼎出库数量": None,
-                "久鼎订单日期": None,
+                "出库单号": None,
+                "产品类型": None,
+                "客户名称": None,
+                "子公司名称": None,
+                "出库数量": None,
+                "订单日期2": None,
                 "出库数量差异": 12,
             },
             {
@@ -249,20 +249,20 @@ def test_save_result_writes_hengyi_summary_and_detail_workbook(monkeypatch, tmp_
                 "工厂": "恒逸高新",
                 "订单日期": "2026/4/8",
                 "送达方": None,
-                "工厂交货单": None,
-                "工厂车牌号": None,
-                "工厂物料组": None,
-                "工厂交货数量": None,
-                "工厂托盘数": None,
-                "工厂业务员": None,
-                "工厂过账日期": None,
+                "交货单": None,
+                "车牌号": None,
+                "物料组": None,
+                "交货数量": None,
+                "托盘数": None,
+                "业务员": None,
+                "过账日期": None,
                 "会员名称": "杭州银瑞化纤有限公司",
-                "久鼎出库单号": "J001",
-                "久鼎产品类型": "FDY",
-                "久鼎客户名称": "恒逸高新",
-                "久鼎子公司名称": "浙江恒逸高新材料有限公司",
-                "久鼎出库数量": 9,
-                "久鼎订单日期": "2026/4/8",
+                "出库单号": "J001",
+                "产品类型": "FDY",
+                "客户名称": "恒逸高新",
+                "子公司名称": "浙江恒逸高新材料有限公司",
+                "出库数量": 9,
+                "订单日期2": "2026/4/8",
                 "出库数量差异": -9,
             },
             {
@@ -271,20 +271,20 @@ def test_save_result_writes_hengyi_summary_and_detail_workbook(monkeypatch, tmp_
                 "工厂": "恒逸高新(3100)",
                 "订单日期": "2026/4/8",
                 "送达方": "杭州银瑞化纤有限公司",
-                "工厂交货单": "M001",
-                "工厂车牌号": "浙A99999",
-                "工厂物料组": "FDY",
-                "工厂交货数量": 10,
-                "工厂托盘数": 10,
-                "工厂业务员": None,
-                "工厂过账日期": "2026/4/8",
+                "交货单": "M001",
+                "车牌号": "浙A99999",
+                "物料组": "FDY",
+                "交货数量": 10,
+                "托盘数": 10,
+                "业务员": None,
+                "过账日期": "2026/4/8",
                 "会员名称": "杭州银瑞化纤有限公司",
-                "久鼎出库单号": "M001",
-                "久鼎产品类型": "FDY",
-                "久鼎客户名称": "恒逸高新",
-                "久鼎子公司名称": "浙江恒逸高新材料有限公司",
-                "久鼎出库数量": 15,
-                "久鼎订单日期": "2026/4/8",
+                "出库单号": "M001",
+                "产品类型": "FDY",
+                "客户名称": "恒逸高新",
+                "子公司名称": "浙江恒逸高新材料有限公司",
+                "出库数量": 15,
+                "订单日期2": "2026/4/8",
                 "出库数量差异": -5,
             },
         ]
@@ -303,8 +303,8 @@ def test_save_result_writes_hengyi_summary_and_detail_workbook(monkeypatch, tmp_
     assert summary_df["异常类型"].tolist() == ["工厂缺单", "久鼎缺单", "数量差异"]
 
     detail_df = pd.read_excel(io.BytesIO(base64.b64decode(saved["download_token"])), sheet_name="异常详情", header=1)
-    assert "工厂交货单" in detail_df.columns
-    assert "久鼎出库单号" in detail_df.columns
+    assert "交货单" in detail_df.columns
+    assert "出库单号" in detail_df.columns
 
 
 def test_save_result_writes_xinfengming_summary_and_detail_workbook(monkeypatch, tmp_path):
@@ -370,9 +370,10 @@ def test_save_result_writes_xinfengming_summary_and_detail_workbook(monkeypatch,
     assert detail_df.columns.tolist()[0] == "异常类型"
     assert "交货单号" in detail_df.columns
     assert "汇总单号" in detail_df.columns
-    assert "工厂简称" in detail_df.columns
+    assert "工厂" in detail_df.columns
     assert "销售组织描述" in detail_df.columns
     assert "出库单号" in detail_df.columns
+    assert "客户名称2" in detail_df.columns
     assert "会员名称" in detail_df.columns
     assert detail_df.columns.tolist()[-1] == "差异数量"
     assert detail_df.iloc[0]["异常类型"] == "数量差异"

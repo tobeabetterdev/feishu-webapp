@@ -24,8 +24,8 @@ interface HengyiGroup {
 const DIFF_KEYS = ['出库数量差异', '差量', '待处理数量', 'pendingQty', 'pending_qty'] as const
 const FACTORY_KEYS = ['工厂', 'factory'] as const
 const HENGYI_TYPES: HengyiCategory[] = ['数量差异', '久鼎缺单', '工厂缺单']
-const HENGYI_FACTORY_DETAIL_COLUMNS = ['送达方', '工厂交货单', '工厂车牌号', '工厂物料组', '工厂交货数量', '工厂托盘数', '工厂业务员', '工厂过账日期']
-const HENGYI_JIUDING_DETAIL_COLUMNS = ['会员名称', '久鼎出库单号', '久鼎产品类型', '久鼎客户名称', '久鼎子公司名称', '久鼎出库数量', '久鼎订单日期']
+const HENGYI_FACTORY_DETAIL_COLUMNS = ['送达方', '交货单', '车牌号', '物料组', '交货数量', '托盘数', '业务员', '过账日期']
+const HENGYI_JIUDING_DETAIL_COLUMNS = ['会员名称', '出库单号', '产品类型', '客户名称', '子公司名称', '出库数量', '订单日期2']
 
 function toText(value: unknown): string {
   if (value === null || value === undefined || value === '') {
