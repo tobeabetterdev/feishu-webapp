@@ -354,7 +354,7 @@ def test_compare_hengyi_data_outputs_new_business_fields():
     assert result.iloc[1]["会员名称"] == "海宁锡铭经编有限公司"
 
 
-def test_compare_hengyi_data_expands_factory_rows_and_keeps_jiuding_once_per_order():
+def test_compare_hengyi_data_groups_factory_rows_by_order_before_comparison():
     factory_df = pd.DataFrame(
         [
             {
@@ -421,9 +421,9 @@ def test_compare_hengyi_data_expands_factory_rows_and_keeps_jiuding_once_per_ord
 
     result = compare_hengyi_data(factory_df, jiuding_df)
 
-    assert result["异常类型"].tolist() == ["数量差异", "数量差异", "数量差异"]
-    assert result["交货单"].tolist() == ["A100", "A100", "B200"]
-    assert result["出库单号"].tolist() == ["A100", None, "B200"]
-    assert result["托盘数"].tolist() == [20, 16, 10]
-    assert result["出库数量"].tolist() == [42, None, 9]
-    assert result["出库数量差异"].tolist() == [-6, None, 1]
+    assert result["异常类型"].tolist() == ["数量差异", "数量差异"]
+    assert result["交货单"].tolist() == ["A100", "B200"]
+    assert result["出库单号"].tolist() == ["A100", "B200"]
+    assert result["托盘数"].tolist() == [36, 10]
+    assert result["出库数量"].tolist() == [42, 9]
+    assert result["出库数量差异"].tolist() == [-6, 1]

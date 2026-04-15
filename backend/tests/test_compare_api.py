@@ -5,6 +5,7 @@ import math
 from types import SimpleNamespace
 
 import pandas as pd
+from openpyxl import Workbook
 from fastapi.testclient import TestClient
 
 from api import compare as compare_api
@@ -25,6 +26,30 @@ def test_get_factory_groups():
     data = response.json()
     assert "hengyi" in data
     assert "xinfengming" in data
+
+
+def test_read_excel_with_fallback_handles_openpyxl_filter_error(monkeypatch):
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["交货单", "托盘数"])
+    sheet.append(["A100", 8])
+    buffer = io.BytesIO()
+    workbook.save(buffer)
+
+    real_read_excel = compare_api.pd.read_excel
+
+    def fake_read_excel(*args, **kwargs):
+        raise ValueError("Value must be either numerical or a string containing a wildcard")
+
+    monkeypatch.setattr(compare_api.pd, "read_excel", fake_read_excel)
+
+    result = compare_api._read_excel_with_fallback(buffer.getvalue())
+
+    monkeypatch.setattr(compare_api.pd, "read_excel", real_read_excel)
+
+    assert result.columns.tolist() == ["交货单", "托盘数"]
+    assert result.iloc[0]["交货单"] == "A100"
+    assert str(result.iloc[0]["托盘数"]) == "8"
 
 
 def test_compare_returns_task_id_immediately_and_runs_in_background(monkeypatch):

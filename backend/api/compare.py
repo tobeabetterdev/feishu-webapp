@@ -7,14 +7,19 @@ import json
 import logging
 import math
 import os
+import posixpath
+import re
 import traceback
 import uuid
 import warnings
+import zipfile
+from xml.etree import ElementTree as ET
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import quote
 
 import pandas as pd
+from openpyxl import load_workbook
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
@@ -137,6 +142,124 @@ def _clean_data(data):
     if isinstance(data, float) and not math.isfinite(data):
         return None
     return data
+
+
+_CELL_REF_PATTERN = re.compile(r"([A-Z]+)(\d+)")
+
+
+def _column_ref_to_index(column_ref: str) -> int:
+    index = 0
+    for char in column_ref:
+        index = index * 26 + (ord(char) - ord("A") + 1)
+    return index - 1
+
+
+def _read_xlsx_rows_from_zip(file_bytes: bytes) -> list[list[str | None]]:
+    namespace = {
+        "main": "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
+        "rel": "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
+        "pkgrel": "http://schemas.openxmlformats.org/package/2006/relationships",
+    }
+
+    with zipfile.ZipFile(io.BytesIO(file_bytes)) as archive:
+        workbook_root = ET.fromstring(archive.read("xl/workbook.xml"))
+        first_sheet = workbook_root.find("main:sheets/main:sheet", namespace)
+        if first_sheet is None:
+            return []
+
+        relation_id = first_sheet.attrib.get(f"{{{namespace['rel']}}}id")
+        if not relation_id:
+            return []
+
+        workbook_rels_root = ET.fromstring(archive.read("xl/_rels/workbook.xml.rels"))
+        target_path = None
+        for relation in workbook_rels_root.findall("pkgrel:Relationship", namespace):
+            if relation.attrib.get("Id") == relation_id:
+                target_path = relation.attrib.get("Target")
+                break
+
+        if not target_path:
+            return []
+
+        normalized_target_path = target_path.lstrip("/")
+        if not normalized_target_path.startswith("xl/"):
+            normalized_target_path = posixpath.join("xl", normalized_target_path)
+        target_path = posixpath.normpath(normalized_target_path)
+
+        shared_strings: list[str] = []
+        if "xl/sharedStrings.xml" in archive.namelist():
+            shared_root = ET.fromstring(archive.read("xl/sharedStrings.xml"))
+            for item in shared_root.findall("main:si", namespace):
+                text_nodes = item.findall(".//main:t", namespace)
+                shared_strings.append("".join(node.text or "" for node in text_nodes))
+
+        sheet_root = ET.fromstring(archive.read(target_path))
+        rows: list[list[str | None]] = []
+
+        for row in sheet_root.findall("main:sheetData/main:row", namespace):
+            row_values: list[str | None] = []
+            for cell in row.findall("main:c", namespace):
+                cell_ref = cell.attrib.get("r", "")
+                match = _CELL_REF_PATTERN.match(cell_ref)
+                if not match:
+                    continue
+
+                column_index = _column_ref_to_index(match.group(1))
+                while len(row_values) <= column_index:
+                    row_values.append(None)
+
+                cell_type = cell.attrib.get("t")
+                if cell_type == "inlineStr":
+                    text_nodes = cell.findall(".//main:t", namespace)
+                    row_values[column_index] = "".join(node.text or "" for node in text_nodes)
+                    continue
+
+                value_node = cell.find("main:v", namespace)
+                if value_node is None:
+                    row_values[column_index] = None
+                    continue
+
+                raw_value = value_node.text
+                if cell_type == "s" and raw_value is not None:
+                    shared_index = int(raw_value)
+                    row_values[column_index] = shared_strings[shared_index] if shared_index < len(shared_strings) else raw_value
+                else:
+                    row_values[column_index] = raw_value
+
+            rows.append(row_values)
+
+    return rows
+
+
+def _build_dataframe_from_rows(rows: list[list[str | None]]) -> pd.DataFrame:
+    if not rows:
+        return pd.DataFrame()
+
+    header = [str(value).strip() if value is not None else "" for value in rows[0]]
+    normalized_rows = []
+    width = len(header)
+    for row in rows[1:]:
+        current = list(row[:width])
+        if len(current) < width:
+            current.extend([None] * (width - len(current)))
+        normalized_rows.append(current)
+
+    return pd.DataFrame(normalized_rows, columns=header, dtype=str)
+
+
+def _read_excel_with_fallback(file_bytes: bytes) -> pd.DataFrame:
+    try:
+        return pd.read_excel(io.BytesIO(file_bytes), dtype=str)
+    except ValueError as exc:
+        message = str(exc)
+        if "Value must be either numerical or a string containing a wildcard" not in message:
+            raise
+
+        try:
+            rows = _read_xlsx_rows_from_zip(file_bytes)
+            return _build_dataframe_from_rows(rows)
+        except zipfile.BadZipFile:
+            raise exc
 
 
 def _update_task(
@@ -411,7 +534,7 @@ def _run_hengyi_comparison_sync(
     parsed_factory_files = []
     selected_short_names: set[str] = set()
     for file_item in factory_files:
-        source_df = pd.read_excel(io.BytesIO(file_item["content"]), dtype=str)
+        source_df = _read_excel_with_fallback(file_item["content"])
         parsed_df = parse_hengyi_factory_data(source_df, source_filename=file_item["filename"])
         selected_short_names.update(
             short_name
@@ -429,7 +552,7 @@ def _run_hengyi_comparison_sync(
     _update_task(task_id, progress=45, message="正在筛选久鼎数据...")
     parsed_jiuding_files = []
     for file_item in jiuding_files:
-        source_df = pd.read_excel(io.BytesIO(file_item["content"]), dtype=str)
+        source_df = _read_excel_with_fallback(file_item["content"])
         parsed_df = parse_hengyi_jiuding_data(
             source_df,
             selected_factory_short_names=selected_short_names or None,

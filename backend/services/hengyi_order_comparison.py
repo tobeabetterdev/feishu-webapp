@@ -573,39 +573,11 @@ def _apply_split_order_reconciliation(result_rows: list[dict[str, Any]]) -> list
     return [row for index, row in enumerate(result_rows) if index not in remove_indexes]
 
 
-def _build_factory_detail_map(factory_df: pd.DataFrame) -> dict[str, list[dict[str, Any]]]:
-    if factory_df.empty:
-        return {}
-
-    detail_map: dict[str, list[dict[str, Any]]] = {}
-    for _, row in factory_df.iterrows():
-        order_no = _normalize_order_no(row.get("订单号"))
-        if order_no is None:
-            continue
-
-        detail_map.setdefault(order_no, []).append(
-            {
-                "交货单": order_no,
-                "送达方": row.get("工厂侧送达方"),
-                "车牌号": row.get("工厂侧车牌号"),
-                "物料组": row.get("工厂侧物料组"),
-                "交货数量": _normalize_quantity(row.get("工厂交货数量")) or _normalize_quantity(row.get("工厂托盘数")),
-                "托盘数": _normalize_quantity(row.get("工厂托盘数")),
-                "业务员": row.get("工厂业务员"),
-                "过账日期": row.get("日期"),
-                "工厂": _format_factory_display(row.get("工厂简称"), row.get("工厂编码")),
-            }
-        )
-
-    return detail_map
-
-
 def _strip_internal_keys(row: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in row.items() if not key.startswith("_")}
 
 
-def _expand_result_rows(result_rows: list[dict[str, Any]], factory_df: pd.DataFrame) -> list[dict[str, Any]]:
-    factory_detail_map = _build_factory_detail_map(factory_df)
+def _finalize_result_rows(result_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     sorted_rows = sorted(
         result_rows,
         key=lambda row: (
@@ -615,44 +587,7 @@ def _expand_result_rows(result_rows: list[dict[str, Any]], factory_df: pd.DataFr
             or ""
         ),
     )
-
-    expanded_rows: list[dict[str, Any]] = []
-    for row in sorted_rows:
-        order_no = _normalize_order_no(row.get("_order_no"))
-        factory_details = factory_detail_map.get(order_no or "", [])
-        public_row = _strip_internal_keys(row)
-
-        if not factory_details:
-            expanded_rows.append(public_row)
-            continue
-
-        for index, detail in enumerate(factory_details):
-            expanded_rows.append(
-                {
-                    "异常类型": public_row["异常类型"],
-                    "订单号": public_row["订单号"],
-                    "工厂": detail["工厂"] or public_row["工厂"],
-                    "订单日期": public_row["订单日期"],
-                    "送达方": detail["送达方"],
-                    "会员名称": public_row["会员名称"] if index == 0 else None,
-                    "交货单": detail["交货单"],
-                    "车牌号": detail["车牌号"],
-                    "物料组": detail["物料组"],
-                    "交货数量": detail["交货数量"],
-                    "托盘数": detail["托盘数"],
-                    "业务员": detail["业务员"],
-                    "过账日期": detail["过账日期"],
-                    "出库单号": public_row["出库单号"] if index == 0 else None,
-                    "产品类型": public_row["产品类型"] if index == 0 else None,
-                    "客户名称": public_row["客户名称"] if index == 0 else None,
-                    "子公司名称": public_row["子公司名称"] if index == 0 else None,
-                    "出库数量": public_row["出库数量"] if index == 0 else None,
-                    "订单日期2": public_row["订单日期2"] if index == 0 else None,
-                    "出库数量差异": public_row["出库数量差异"] if index == 0 else None,
-                }
-            )
-
-    return expanded_rows
+    return [_strip_internal_keys(row) for row in sorted_rows]
 
 
 def compare_hengyi_data(factory_df: pd.DataFrame, jiuding_df: pd.DataFrame) -> pd.DataFrame:
@@ -660,7 +595,7 @@ def compare_hengyi_data(factory_df: pd.DataFrame, jiuding_df: pd.DataFrame) -> p
 
     initial_result_rows = _build_initial_result_rows(factory_df, jiuding_df)
     reconciled_rows = _apply_split_order_reconciliation(initial_result_rows)
-    final_rows = _expand_result_rows(reconciled_rows, factory_df)
+    final_rows = _finalize_result_rows(reconciled_rows)
 
     if not final_rows:
         return pd.DataFrame(columns=RESULT_COLUMNS)
