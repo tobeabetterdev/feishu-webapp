@@ -56,7 +56,7 @@ def test_parse_hengyi_factory_data_falls_back_to_filename_alias_when_code_is_unk
     assert result.iloc[0]["工厂侧物料组"] == "FDY"
 
 
-def test_parse_hengyi_factory_data_deduplicates_same_display_rows():
+def test_parse_hengyi_factory_data_groups_same_order_rows_and_sums_quantities():
     source_df = pd.DataFrame(
         [
             {
@@ -90,8 +90,46 @@ def test_parse_hengyi_factory_data_deduplicates_same_display_rows():
 
     assert len(result) == 1
     assert result.iloc[0]["订单号"] == "0088405489"
-    assert result.iloc[0]["工厂托盘数"] == 8
-    assert result.iloc[0]["工厂交货数量"] == 5760
+    assert result.iloc[0]["工厂托盘数"] == 16
+    assert result.iloc[0]["工厂交货数量"] == 11520
+
+
+def test_parse_hengyi_factory_data_groups_by_order_and_sums_quantity_fields():
+    source_df = pd.DataFrame(
+        [
+            {
+                "过账日期": "2026-04-12 00:00:00",
+                "送达方": "浙江物产经编供应链有限公司",
+                "交货单": "0088405490",
+                "车牌号": "ZT-浙A33H55",
+                "托盘数": "8",
+                "工厂": "9710",
+                "物料组": "130",
+                "物料描述": "POY-220dtex/96f-XA161001SS-AA",
+                "交货数量": "5760",
+                "业务员": "杨俊先",
+            },
+            {
+                "过账日期": "2026-04-12 00:00:00",
+                "送达方": "浙江物产经编供应链有限公司",
+                "交货单": "0088405490",
+                "车牌号": "ZT-浙A33H55",
+                "托盘数": "1",
+                "工厂": "9710",
+                "物料组": "130",
+                "物料描述": "POY-220dtex/96f-XA161001SS-AA",
+                "交货数量": "48",
+                "业务员": "杨俊先",
+            },
+        ]
+    )
+
+    result = parse_hengyi_factory_data(source_df, source_filename="4.12.xlsx")
+
+    assert len(result) == 1
+    assert result.iloc[0]["订单号"] == "0088405490"
+    assert result.iloc[0]["工厂托盘数"] == 9
+    assert result.iloc[0]["工厂交货数量"] == 5808
 
 
 def test_parse_hengyi_jiuding_data_filters_to_selected_factories():
@@ -424,6 +462,47 @@ def test_compare_hengyi_data_groups_factory_rows_by_order_before_comparison():
     assert result["异常类型"].tolist() == ["数量差异", "数量差异"]
     assert result["交货单"].tolist() == ["A100", "B200"]
     assert result["出库单号"].tolist() == ["A100", "B200"]
+    assert result["交货数量"].tolist() == [36, 10]
     assert result["托盘数"].tolist() == [36, 10]
     assert result["出库数量"].tolist() == [42, 9]
     assert result["出库数量差异"].tolist() == [-6, 1]
+
+
+def test_compare_hengyi_data_keeps_delivery_quantity_separate_from_pallet_quantity():
+    factory_df = pd.DataFrame(
+        [
+            {
+                "日期": "2026/4/8",
+                "订单号": "A100",
+                "工厂简称": "恒逸高新",
+                "工厂编码": "3100",
+                "工厂侧送达方": "杭州银瑞化纤有限公司",
+                "工厂侧物料组": "FDY",
+                "工厂侧车牌号": "浙A12345",
+                "工厂托盘数": 36,
+                "工厂交货数量": 5808,
+            }
+        ]
+    )
+    jiuding_df = pd.DataFrame(
+        [
+            {
+                "日期": "2026/4/8",
+                "订单号": "A100",
+                "工厂简称": "恒逸高新",
+                "久鼎侧客户全称": "浙江恒逸高新材料有限公司",
+                "久鼎侧客户简称": "恒逸高新",
+                "久鼎侧会员名称": "杭州银瑞化纤有限公司",
+                "久鼎侧产品类型": "FDY",
+                "久鼎出库数量": 42,
+                "久鼎侧子公司名称": "浙江恒逸高新材料有限公司",
+            }
+        ]
+    )
+
+    result = compare_hengyi_data(factory_df, jiuding_df)
+
+    assert result.iloc[0]["交货数量"] == 5808
+    assert result.iloc[0]["托盘数"] == 36
+    assert result.iloc[0]["出库数量"] == 42
+    assert result.iloc[0]["出库数量差异"] == -6

@@ -93,6 +93,16 @@ def _require_columns(df: pd.DataFrame, required_columns: list[str]) -> None:
         raise ValueError(f"缺少必需列: {', '.join(missing)}")
 
 
+def _first_non_empty(series: pd.Series) -> Any:
+    for value in series:
+        if value is None or pd.isna(value):
+            continue
+        if isinstance(value, str) and not value.strip():
+            continue
+        return value
+    return None
+
+
 def _should_drop_row(row: dict[str, Any]) -> bool:
     order_no = row.get("单号")
     quantity = row.get("数量", 0)
@@ -177,6 +187,32 @@ def parse_xinfengming_factory_data(source_df: pd.DataFrame, *, source_filename: 
     parsed = pd.DataFrame(parsed_rows)
     if parsed.empty:
         parsed = pd.DataFrame(columns=[*OUTPUT_COLUMNS, *FACTORY_DETAIL_COLUMNS])
+    else:
+        parsed["单号"] = parsed["单号"].map(_normalize_text)
+        parsed = parsed.dropna(subset=["单号"])
+        parsed = (
+            parsed.groupby("单号", as_index=False)
+            .agg(
+                {
+                    "日期": _first_non_empty,
+                    "工厂": _first_non_empty,
+                    "型号": _first_non_empty,
+                    "公司": _first_non_empty,
+                    "数量": "sum",
+                    "交货单号": _first_non_empty,
+                    "交货创建日期": _first_non_empty,
+                    "销售组织描述": _first_non_empty,
+                    "客户名称": _first_non_empty,
+                    "业务员": _first_non_empty,
+                    "车牌号": _first_non_empty,
+                    "物料组描述": _first_non_empty,
+                    "件数": "sum",
+                    "交货单类型": _first_non_empty,
+                    "包装批号": _first_non_empty,
+                }
+            )
+            .reset_index(drop=True)
+        )
     source_hint = None
     if not parsed.empty and "工厂" in parsed.columns:
         source_hint = _normalize_text(parsed["工厂"].iloc[0])

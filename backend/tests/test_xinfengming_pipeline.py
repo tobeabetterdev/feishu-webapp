@@ -63,6 +63,36 @@ def test_parse_xinfengming_factory_data_uses_fixed_columns_and_drops_summary_row
     ]
 
 
+def test_parse_xinfengming_factory_data_groups_by_order_and_sums_quantity():
+    source_df = pd.DataFrame(
+        [
+            {
+                "交货单号": "008001",
+                "交货创建日期": "2026-04-09 00:00:00",
+                "销售组织描述": "中跃化纤",
+                "客户名称": "绍兴柯桥炯炯纺织有限公司",
+                "物料组描述": "POY",
+                "件数": "33",
+            },
+            {
+                "交货单号": "008001",
+                "交货创建日期": "2026-04-09 00:00:00",
+                "销售组织描述": "中跃化纤",
+                "客户名称": "绍兴柯桥炯炯纺织有限公司",
+                "物料组描述": "POY",
+                "件数": "7",
+            },
+        ]
+    )
+
+    result = parse_xinfengming_factory_data(source_df, source_filename="factory.xlsx")
+
+    assert len(result) == 1
+    assert result.iloc[0]["单号"] == "008001"
+    assert result.iloc[0]["数量"] == 40
+    assert result.iloc[0]["件数"] == 40
+
+
 def test_parse_xinfengming_jiuding_data_uses_fixed_columns_and_attaches_filter_company():
     source_df = pd.DataFrame(
         [

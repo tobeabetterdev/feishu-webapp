@@ -115,6 +115,37 @@ def _first_non_empty(series: pd.Series) -> Any:
     return None
 
 
+def _aggregate_factory_display_rows(parsed: pd.DataFrame) -> pd.DataFrame:
+    if parsed.empty:
+        return parsed
+
+    working = parsed.copy()
+    working["订单号"] = working["订单号"].map(_normalize_order_no)
+    working = working.dropna(subset=["订单号"])
+    if working.empty:
+        return working
+
+    return (
+        working.groupby("订单号", as_index=False)
+        .agg(
+            {
+                "日期": _first_non_empty,
+                "工厂简称": _first_non_empty,
+                "工厂全称": _first_non_empty,
+                "工厂编码": _first_non_empty,
+                "工厂侧送达方": _first_non_empty,
+                "工厂侧物料组": _first_non_empty,
+                "工厂侧车牌号": _first_non_empty,
+                "工厂托盘数": "sum",
+                "工厂交货数量": "sum",
+                "工厂业务员": _first_non_empty,
+                "来源文件": _first_non_empty,
+            }
+        )
+        .reset_index(drop=True)
+    )
+
+
 def _require_columns(df: pd.DataFrame, required_columns: list[str]) -> None:
     missing = [column for column in required_columns if column not in df.columns]
     if missing:
@@ -264,6 +295,7 @@ def parse_hengyi_factory_data(source_df: pd.DataFrame, *, source_filename: str) 
         )
 
     parsed = parsed[~parsed.apply(_should_drop_factory_row, axis=1)]
+    parsed = _aggregate_factory_display_rows(parsed)
     parsed = parsed.drop_duplicates().reset_index(drop=True)
     return parsed
 
@@ -447,14 +479,15 @@ def _build_initial_result_rows(factory_df: pd.DataFrame, jiuding_df: pd.DataFram
 
     result_rows: list[dict[str, Any]] = []
     for _, row in merged.iterrows():
-        factory_qty = _normalize_quantity(row.get("工厂托盘数"))
+        factory_pallet_qty = _normalize_quantity(row.get("工厂托盘数"))
+        factory_delivery_qty = _normalize_quantity(row.get("工厂交货数量"))
         jiuding_qty = _normalize_quantity(row.get("久鼎出库数量"))
-        diff = factory_qty - jiuding_qty
+        diff = factory_pallet_qty - jiuding_qty
         if diff == 0:
             continue
 
         order_no = _normalize_order_no(row.get("订单号"))
-        factory_exists = factory_qty > 0
+        factory_exists = factory_pallet_qty > 0
         jiuding_exists = jiuding_qty > 0
 
         if factory_exists and jiuding_exists:
@@ -481,8 +514,8 @@ def _build_initial_result_rows(factory_df: pd.DataFrame, jiuding_df: pd.DataFram
                 "交货单": order_no if factory_exists else None,
                 "车牌号": row.get("工厂侧车牌号"),
                 "物料组": row.get("工厂侧物料组"),
-                "交货数量": factory_qty if factory_exists else None,
-                "托盘数": factory_qty if factory_exists else None,
+                "交货数量": factory_delivery_qty if factory_exists else None,
+                "托盘数": factory_pallet_qty if factory_exists else None,
                 "业务员": row.get("工厂业务员"),
                 "过账日期": row.get("日期_factory"),
                 "出库单号": order_no if jiuding_exists else None,
@@ -493,7 +526,7 @@ def _build_initial_result_rows(factory_df: pd.DataFrame, jiuding_df: pd.DataFram
                 "订单日期2": row.get("日期_jiuding"),
                 "出库数量差异": diff,
                 "_order_no": order_no,
-                "_factory_total_qty": factory_qty,
+                "_factory_total_qty": factory_pallet_qty,
                 "_jiuding_total_qty": jiuding_qty,
                 "_factory_order_no": order_no if factory_exists else None,
                 "_jiuding_order_no": order_no if jiuding_exists else None,
