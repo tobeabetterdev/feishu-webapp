@@ -187,6 +187,7 @@ def parse_xinfengming_factory_data(source_df: pd.DataFrame, *, source_filename: 
     parsed = pd.DataFrame(parsed_rows)
     if parsed.empty:
         parsed = pd.DataFrame(columns=[*OUTPUT_COLUMNS, *FACTORY_DETAIL_COLUMNS])
+        parsed["来源工厂线索"] = None
     else:
         parsed["单号"] = parsed["单号"].map(_normalize_text)
         parsed = parsed.dropna(subset=["单号"])
@@ -213,10 +214,9 @@ def parse_xinfengming_factory_data(source_df: pd.DataFrame, *, source_filename: 
             )
             .reset_index(drop=True)
         )
-    source_hint = None
-    if not parsed.empty and "工厂" in parsed.columns:
-        source_hint = _normalize_text(parsed["工厂"].iloc[0])
-    return _attach_context(parsed, source_filename=source_filename, source_hint=source_hint)
+        parsed["来源工厂线索"] = parsed["销售组织描述"].map(_normalize_text)
+    parsed["来源文件"] = source_filename
+    return parsed
 
 
 def parse_xinfengming_jiuding_data(source_df: pd.DataFrame, *, source_filename: str) -> pd.DataFrame:

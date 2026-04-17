@@ -394,12 +394,11 @@ def test_save_result_writes_xinfengming_summary_and_detail_workbook(monkeypatch,
     detail_df = pd.read_excel(io.BytesIO(base64.b64decode(saved["download_token"])), sheet_name="异常详情", header=1)
     assert detail_df.columns.tolist()[0] == "异常类型"
     assert "交货单号" in detail_df.columns
-    assert "汇总单号" in detail_df.columns
-    assert "工厂" in detail_df.columns
+    assert "汇总单号" not in detail_df.columns
+    assert "工厂" not in detail_df.columns
     assert "销售组织描述" in detail_df.columns
     assert "出库单号" in detail_df.columns
     assert "客户名称2" in detail_df.columns
     assert "会员名称" in detail_df.columns
     assert detail_df.columns.tolist()[-1] == "差异数量"
     assert detail_df.iloc[0]["异常类型"] == "数量差异"
-    assert str(detail_df.iloc[0]["汇总单号"]) == "8006349234"

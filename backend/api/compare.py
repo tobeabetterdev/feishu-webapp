@@ -96,8 +96,6 @@ XINFENGMING_DETAIL_COLUMNS = [
     "交货创建日期",
     "销售组织描述",
     "客户名称",
-    "汇总单号",
-    "工厂",
     "业务员",
     "车牌号",
     "物料组描述",
@@ -117,7 +115,7 @@ XINFENGMING_DETAIL_COLUMNS = [
 ]
 
 XINFENGMING_HEADER_GROUPS = {
-    "工厂": ["交货单号", "交货创建日期", "销售组织描述", "客户名称", "汇总单号", "工厂", "业务员", "车牌号", "物料组描述", "件数", "交货单类型", "包装批号"],
+    "工厂": ["交货单号", "交货创建日期", "销售组织描述", "客户名称", "业务员", "车牌号", "物料组描述", "件数", "交货单类型", "包装批号"],
     "久鼎": ["出库单号", "订单日期", "客户名称2", "会员名称", "产品类型", "实际出库数量", "子公司名称", "订单状态", "送货方式", "差异数量"],
 }
 
@@ -442,8 +440,6 @@ def _build_xinfengming_detail_sheet(result_df: pd.DataFrame, artifacts: Dict[str
                     "交货创建日期": factory_detail.get("交货创建日期"),
                     "销售组织描述": factory_detail.get("销售组织描述"),
                     "客户名称": factory_detail.get("客户名称"),
-                    "汇总单号": order_no,
-                    "工厂": summary_row.get("工厂"),
                     "业务员": factory_detail.get("业务员"),
                     "车牌号": factory_detail.get("车牌号"),
                     "物料组描述": factory_detail.get("物料组描述"),

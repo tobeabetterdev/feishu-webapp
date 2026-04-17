@@ -93,6 +93,34 @@ def test_parse_xinfengming_factory_data_groups_by_order_and_sums_quantity():
     assert result.iloc[0]["件数"] == 40
 
 
+def test_parse_xinfengming_factory_data_keeps_sales_org_hint_per_order():
+    source_df = pd.DataFrame(
+        [
+            {
+                "交货单号": "8006366001",
+                "交货创建日期": "2026-04-16 00:00:00",
+                "销售组织描述": "中鸿新材料",
+                "客户名称": "客户甲",
+                "物料组描述": "POY",
+                "件数": "3",
+            },
+            {
+                "交货单号": "8006366359",
+                "交货创建日期": "2026-04-16 00:00:00",
+                "销售组织描述": "中欣化纤",
+                "客户名称": "客户乙",
+                "物料组描述": "POY",
+                "件数": "7",
+            },
+        ]
+    )
+
+    result = parse_xinfengming_factory_data(source_df, source_filename="factory.xlsx")
+
+    assert result[result["单号"] == "8006366001"].iloc[0]["来源工厂线索"] == "中鸿新材料"
+    assert result[result["单号"] == "8006366359"].iloc[0]["来源工厂线索"] == "中欣化纤"
+
+
 def test_parse_xinfengming_jiuding_data_uses_fixed_columns_and_attaches_filter_company():
     source_df = pd.DataFrame(
         [
