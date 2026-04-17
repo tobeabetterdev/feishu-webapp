@@ -78,6 +78,14 @@ class DataComparator:
                 return resolved
         return None
 
+    @staticmethod
+    def _has_value(value: object) -> bool:
+        if value is None or pd.isna(value):
+            return False
+        if isinstance(value, str):
+            return bool(value.strip())
+        return True
+
     def _resolve_hengyi_from_filename(self, filename: object) -> str | None:
         if filename is None or pd.isna(filename):
             return None
@@ -206,14 +214,36 @@ class DataComparator:
                 "日期": merged["日期_jiuding"].combine_first(merged["日期_factory"]),
                 "单号": merged["单号"].astype(str),
                 "工厂": merged.apply(
-                    lambda row: self._resolve_factory_name(
-                        row.get("筛选公司_jiuding", row.get("筛选公司")),
-                        row.get("公司_jiuding"),
-                        row.get("工厂_jiuding"),
-                        row.get("公司_factory"),
-                        row.get("工厂_factory"),
+                    lambda row: (
+                        self._resolve_factory_name(
+                            row.get("筛选公司_jiuding", row.get("筛选公司")),
+                            row.get("公司_jiuding"),
+                            row.get("工厂_jiuding"),
+                        )
+                        if self.factory_type == "xinfengming"
+                        and (
+                            self._has_value(row.get("筛选公司_jiuding", row.get("筛选公司")))
+                            or self._has_value(row.get("公司_jiuding"))
+                            or self._has_value(row.get("工厂_jiuding"))
+                        )
+                        else None
                     )
-                    or self._resolve_factory_fallback(row),
+                    or (
+                        self._resolve_factory_fallback(row)
+                        if self.factory_type == "xinfengming"
+                        else self._resolve_factory_name(
+                            row.get("筛选公司_jiuding", row.get("筛选公司")),
+                            row.get("公司_jiuding"),
+                            row.get("工厂_jiuding"),
+                            row.get("公司_factory"),
+                            row.get("工厂_factory"),
+                        )
+                    )
+                    or (
+                        self._resolve_factory_name(row.get("工厂_factory"))
+                        if self.factory_type == "xinfengming"
+                        else self._resolve_factory_fallback(row)
+                    ),
                     axis=1,
                 ),
                 "型号": merged["型号_jiuding"].combine_first(merged["型号_factory"]),

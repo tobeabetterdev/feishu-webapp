@@ -350,6 +350,74 @@ def test_compare_backfills_xinfengming_factory_from_sales_org_hint():
     assert result.iloc[0]["工厂"] == "中石"
 
 
+def test_compare_xinfengming_factory_only_order_uses_sales_org_for_factory_and_customer_name_for_company():
+    factory_df = pd.DataFrame(
+        [
+            {
+                "日期": "2026/4/8",
+                "单号": "X-901",
+                "工厂": "中石销售组织",
+                "型号": "POY",
+                "公司": "绍兴柯桥炯炯纺织有限公司",
+                "数量": 10,
+                "来源文件": "factory.xlsx",
+                "来源工厂线索": "中石销售组织",
+            }
+        ]
+    )
+    jiuding_df = pd.DataFrame(
+        [
+            {
+                "日期": None,
+                "单号": "X-901",
+                "工厂": None,
+                "型号": None,
+                "公司": None,
+                "数量": 0,
+            }
+        ]
+    )
+
+    result = DataComparator(factory_df, jiuding_df, "xinfengming").compare()
+
+    assert result.iloc[0]["工厂"] == "中石"
+    assert result.iloc[0]["公司"] == "绍兴柯桥炯炯纺织有限公司"
+
+
+def test_compare_xinfengming_factory_only_order_does_not_map_factory_from_factory_customer_name():
+    factory_df = pd.DataFrame(
+        [
+            {
+                "日期": "2026/4/8",
+                "单号": "X-902",
+                "工厂": "中石销售组织",
+                "型号": "POY",
+                "公司": "新凤鸣江苏新拓新材有限公司",
+                "数量": 10,
+                "来源文件": "factory.xlsx",
+                "来源工厂线索": "中石销售组织",
+            }
+        ]
+    )
+    jiuding_df = pd.DataFrame(
+        [
+            {
+                "日期": None,
+                "单号": "X-902",
+                "工厂": None,
+                "型号": None,
+                "公司": None,
+                "数量": 0,
+            }
+        ]
+    )
+
+    result = DataComparator(factory_df, jiuding_df, "xinfengming").compare()
+
+    assert result.iloc[0]["工厂"] == "中石"
+    assert result.iloc[0]["公司"] == "新凤鸣江苏新拓新材有限公司"
+
+
 def test_compare_filters_hengyi_jiuding_rows_by_matched_filename_short_names():
     factory_df = pd.DataFrame(
         [
