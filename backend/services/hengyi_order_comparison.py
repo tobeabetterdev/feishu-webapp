@@ -224,7 +224,6 @@ def _short_name_from_company(company_name: object) -> str | None:
         return None
     return company_to_short_name.get(company_text)
 
-
 def _should_drop_factory_row(row: pd.Series) -> bool:
     return (
         row["订单号"] is None
@@ -314,7 +313,7 @@ def parse_hengyi_jiuding_data(
     for _, row in working.iterrows():
         customer_name = _normalize_text(row.get("客户名称"))
         short_name = company_to_short_name.get(customer_name or "")
-        if selected_factory_short_names and short_name not in selected_factory_short_names:
+        if short_name is None:
             continue
 
         parsed_row = {

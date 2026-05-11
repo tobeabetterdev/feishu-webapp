@@ -132,7 +132,7 @@ def test_parse_hengyi_factory_data_groups_by_order_and_sums_quantity_fields():
     assert result.iloc[0]["工厂交货数量"] == 5808
 
 
-def test_parse_hengyi_jiuding_data_filters_to_selected_factories():
+def test_parse_hengyi_jiuding_data_ignores_selected_factory_filter_and_keeps_allowed_customers():
     source_df = pd.DataFrame(
         [
             {
@@ -156,9 +156,29 @@ def test_parse_hengyi_jiuding_data_filters_to_selected_factories():
 
     result = parse_hengyi_jiuding_data(source_df, selected_factory_short_names={"恒逸高新"})
 
-    assert result["订单号"].tolist() == ["0088395730"]
+    assert result["订单号"].tolist() == ["0088395730", "0088395999"]
     assert result.iloc[0]["工厂简称"] == "恒逸高新"
     assert result.iloc[0]["久鼎出库数量"] == 42
+
+
+def test_parse_hengyi_jiuding_data_keeps_all_hengyi_factories_without_selection_filter():
+    source_df = pd.DataFrame(
+        [
+            {
+                "订单日期": "2026-05-07 14:16:42.0",
+                "出库单号": "0087286859",
+                "会员名称": "浙江恒逸石化有限公司",
+                "客户名称": "太仓逸枫化纤有限公司",
+                "产品类型": "POY",
+                "实际出库数量": "28",
+            }
+        ]
+    )
+
+    result = parse_hengyi_jiuding_data(source_df)
+
+    assert result["订单号"].tolist() == ["0087286859"]
+    assert result.iloc[0]["工厂简称"] == "逸枫"
 
 
 def test_parse_hengyi_jiuding_data_keeps_time_in_date():

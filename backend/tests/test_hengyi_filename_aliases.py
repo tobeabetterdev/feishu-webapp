@@ -3,7 +3,7 @@ import pandas as pd
 from services.data_comparator import DataComparator
 
 
-def test_hengyi_filename_alias_highxin_narrows_jiuding_to_gaoxin_customer():
+def test_hengyi_filename_alias_highxin_does_not_narrow_jiuding_customers():
     factory_df = pd.DataFrame(
         [
             {
@@ -53,8 +53,8 @@ def test_hengyi_filename_alias_highxin_narrows_jiuding_to_gaoxin_customer():
     result = DataComparator(factory_df, jiuding_df, "hengyi").compare()
 
     assert "GX-999" in set(result["单号"].tolist())
-    assert "HT-999" not in set(result["单号"].tolist())
-    assert "ST-999" not in set(result["单号"].tolist())
+    assert "HT-999" in set(result["单号"].tolist())
+    assert "ST-999" in set(result["单号"].tolist())
 
 
 def test_hengyi_filename_alias_highxin_backfills_factory_for_factory_only_rows():

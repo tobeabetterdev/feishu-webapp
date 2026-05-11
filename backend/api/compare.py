@@ -528,20 +528,13 @@ def _run_hengyi_comparison_sync(
     _update_task(task_id, status="parsing", progress=15, message="正在解析恒逸工厂数据...")
 
     parsed_factory_files = []
-    selected_short_names: set[str] = set()
     for file_item in factory_files:
         source_df = _read_excel_with_fallback(file_item["content"])
         parsed_df = parse_hengyi_factory_data(source_df, source_filename=file_item["filename"])
-        selected_short_names.update(
-            short_name
-            for short_name in parsed_df["工厂简称"].dropna().tolist()
-            if str(short_name).strip()
-        )
         LOGGER.info(
-            "hengyi_factory filename=%s columns=%s selected_factories=%s",
+            "hengyi_factory filename=%s columns=%s",
             file_item["filename"],
             ["过账日期", "送达方", "交货单", "车牌号", "托盘数", "工厂"],
-            sorted(selected_short_names),
         )
         parsed_factory_files.append({"filename": file_item["filename"], "parsed_df": parsed_df})
 
@@ -549,15 +542,11 @@ def _run_hengyi_comparison_sync(
     parsed_jiuding_files = []
     for file_item in jiuding_files:
         source_df = _read_excel_with_fallback(file_item["content"])
-        parsed_df = parse_hengyi_jiuding_data(
-            source_df,
-            selected_factory_short_names=selected_short_names or None,
-        )
+        parsed_df = parse_hengyi_jiuding_data(source_df)
         LOGGER.info(
-            "hengyi_jiuding filename=%s columns=%s selected_factories=%s",
+            "hengyi_jiuding filename=%s columns=%s",
             file_item["filename"],
             ["订单日期", "出库单号", "会员名称", "客户名称", "产品类型", "实际出库数量"],
-            sorted(selected_short_names),
         )
         parsed_jiuding_files.append({"filename": file_item["filename"], "parsed_df": parsed_df})
 

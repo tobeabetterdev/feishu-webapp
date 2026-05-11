@@ -418,7 +418,7 @@ def test_compare_xinfengming_factory_only_order_does_not_map_factory_from_factor
     assert result.iloc[0]["公司"] == "新凤鸣江苏新拓新材有限公司"
 
 
-def test_compare_filters_hengyi_jiuding_rows_by_matched_filename_short_names():
+def test_compare_does_not_filter_hengyi_jiuding_rows_by_matched_filename_short_names():
     factory_df = pd.DataFrame(
         [
             {
@@ -456,6 +456,6 @@ def test_compare_filters_hengyi_jiuding_rows_by_matched_filename_short_names():
 
     result = DataComparator(factory_df, jiuding_df, "hengyi").compare()
 
-    assert len(result) == 1
-    assert result.iloc[0]["单号"] == "H-001"
-    assert result.iloc[0]["工厂"] == "双兔"
+    assert len(result) == 2
+    assert result["单号"].tolist() == ["H-001", "H-002"]
+    assert result["工厂"].tolist() == ["双兔", "恒逸高新"]

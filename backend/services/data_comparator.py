@@ -153,10 +153,6 @@ class DataComparator:
 
         working = df.copy()
         effective_customers = set(self.allowed_customers)
-        if self.factory_type == "hengyi":
-            narrowed_customers = self._resolve_hengyi_customers_from_filenames()
-            if narrowed_customers:
-                effective_customers = narrowed_customers
 
         if not effective_customers:
             return working
